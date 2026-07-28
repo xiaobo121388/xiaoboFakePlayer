@@ -1,0 +1,15 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import { CAPABILITY_MATRIX, isCapabilityEnabled } from "../src/domain/capabilities.js";
+
+test("capability matrix is versioned, unique, and hides unverified controls", () => {
+    assert.equal(CAPABILITY_MATRIX.gameVersion, "26.34");
+    const ids = CAPABILITY_MATRIX.capabilities.map((capability) => capability.id);
+    assert.equal(new Set(ids).size, ids.length);
+    assert.equal(isCapabilityEnabled("persona_skin_copy"), true);
+    assert.equal(isCapabilityEnabled("sneaking"), false);
+    assert.equal(isCapabilityEnabled("hunger_saturation_write"), false);
+    assert.equal(isCapabilityEnabled("automatic_fishing"), false);
+    assert.equal(isCapabilityEnabled("classic_skin_texture_copy"), false);
+});

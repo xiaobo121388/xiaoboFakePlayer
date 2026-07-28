@@ -1,18 +1,18 @@
 {
     "format_version": 2,
     "header": {
-        "description": "",
+        "description": "Bedrock 26.34 simulated-player manager",
         "min_engine_version": [
             1,
-            18,
-            0
+            26,
+            34
         ],
-        "name": "behavior_pack",
+        "name": "Xiaobo Fake Player BP",
         "uuid": "b6fad072-da4d-49fd-94ac-e1986246f7f6",
         "version": [
+            1,
             0,
-            0,
-            1
+            0
         ]
     },
     "modules": [
@@ -20,10 +20,43 @@
             "type": "data",
             "uuid": "597ffe54-2192-488e-9c6e-bc8e080f34a7",
             "version": [
+                1,
                 0,
-                0,
-                1
+                0
             ]
+        },
+        {
+            "type": "script",
+            "language": "javascript",
+            "uuid": "898063d8-3598-4d07-b61a-154c67f60210",
+            "version": [
+                1,
+                0,
+                0
+            ],
+            "entry": "scripts/main.js"
+        }
+    ],
+    "dependencies": [
+        {
+            "uuid": "2a73ae9a-b734-48b0-8750-df774590a2af",
+            "version": [
+                1,
+                0,
+                0
+            ]
+        },
+        {
+            "module_name": "@minecraft/server",
+            "version": "2.9.0-beta"
+        },
+        {
+            "module_name": "@minecraft/server-ui",
+            "version": "2.2.0-beta"
+        },
+        {
+            "module_name": "@minecraft/server-gametest",
+            "version": "1.0.0-beta"
         }
     ]
 }

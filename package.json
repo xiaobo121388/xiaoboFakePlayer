@@ -1,0 +1,22 @@
+{
+    "name": "xiaobo-fake-player",
+    "version": "1.0.0",
+    "private": true,
+    "type": "module",
+    "engines": {
+        "node": ">=22"
+    },
+    "scripts": {
+        "typecheck": "tsc -p tsconfig.json --noEmit",
+        "build": "tsc -p tsconfig.json",
+        "test:compile": "tsc -p tsconfig.test.json",
+        "test": "npm run test:compile && node --test .test-dist/test/*.test.js"
+    },
+    "devDependencies": {
+        "@minecraft/server": "2.9.0-beta.1.26.34-stable",
+        "@minecraft/server-gametest": "1.0.0-beta.1.26.34-stable",
+        "@minecraft/server-ui": "2.2.0-beta.1.26.34-stable",
+        "@types/node": "^22.17.0",
+        "typescript": "^5.9.2"
+    }
+}

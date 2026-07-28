@@ -1,18 +1,18 @@
 {
     "format_version": 2,
     "header": {
-        "description": "",
+        "description": "Localization resources for Xiaobo Fake Player",
         "min_engine_version": [
             1,
-            18,
-            0
+            26,
+            34
         ],
-        "name": "resource_pack",
+        "name": "Xiaobo Fake Player RP",
         "uuid": "2a73ae9a-b734-48b0-8750-df774590a2af",
         "version": [
+            1,
             0,
-            0,
-            1
+            0
         ]
     },
     "modules": [
@@ -20,9 +20,9 @@
             "type": "resources",
             "uuid": "055c591e-c48c-4e03-96c4-3858b7903f55",
             "version": [
+                1,
                 0,
-                0,
-                1
+                0
             ]
         }
     ]

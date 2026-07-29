@@ -4,3 +4,4 @@ export function ok(value) {
 export function err(code, message) {
     return { ok: false, error: { code, message } };
 }
+//# sourceMappingURL=results.js.map

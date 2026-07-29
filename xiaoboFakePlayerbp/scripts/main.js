@@ -101,3 +101,4 @@ system.runInterval(() => {
         console.error(`[xiaobo-fake-player] behavior tick crashed: ${message}`);
     }
 });
+//# sourceMappingURL=main.js.map

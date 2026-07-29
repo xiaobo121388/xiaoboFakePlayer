@@ -122,3 +122,4 @@ function sameBlock(left, right) {
         && Math.floor(left.y) === Math.floor(right.y)
         && Math.floor(left.z) === Math.floor(right.z);
 }
+//# sourceMappingURL=worldQueries.js.map

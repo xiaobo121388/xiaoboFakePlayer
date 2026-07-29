@@ -28,3 +28,4 @@ export class BankedWorldStateStore {
         return this.operations.commit(expectedRevision, value);
     }
 }
+//# sourceMappingURL=bankedWorldStateStore.js.map

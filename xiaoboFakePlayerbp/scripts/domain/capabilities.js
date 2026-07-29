@@ -63,3 +63,4 @@ export const CAPABILITY_MATRIX = {
 export function isCapabilityEnabled(id) {
     return CAPABILITY_MATRIX.capabilities.some((capability) => capability.id === id && capability.availability === "enabled");
 }
+//# sourceMappingURL=capabilities.js.map

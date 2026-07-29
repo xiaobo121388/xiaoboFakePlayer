@@ -559,3 +559,4 @@ function isFinitePoint(point) {
 function floorPoint(point) {
     return { x: Math.floor(point.x), y: Math.floor(point.y), z: Math.floor(point.z) };
 }
+//# sourceMappingURL=behaviorService.js.map

@@ -456,3 +456,4 @@ function offset(origin, x, y, z) {
 function safeId(value) {
     return value.toLowerCase().replace(/[^a-z0-9_]+/g, "_");
 }
+//# sourceMappingURL=structureInventorySnapshotStore.js.map

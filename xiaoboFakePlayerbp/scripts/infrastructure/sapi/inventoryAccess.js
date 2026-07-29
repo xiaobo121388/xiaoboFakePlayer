@@ -279,3 +279,4 @@ function classifyImage(current, before, after) {
         return "mixed";
     return hasAfterOnly || !hasBeforeOnly ? "after" : "before";
 }
+//# sourceMappingURL=inventoryAccess.js.map

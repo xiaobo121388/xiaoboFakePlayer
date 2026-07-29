@@ -1,0 +1,17 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "minecraft-js",
+            "request": "attach",
+            "name": "Minecraft Bedrock: Listen",
+            "mode": "listen",
+            "preLaunchTask": "minecraft: build and deploy",
+            "targetModuleUuid": "898063d8-3598-4d07-b61a-154c67f60210",
+            "localRoot": "${workspaceFolder}/xiaoboFakePlayerbp/scripts",
+            "sourceMapRoot": "${workspaceFolder}/xiaoboFakePlayerbp/scripts",
+            "generatedSourceRoot": "${workspaceFolder}/xiaoboFakePlayerbp/scripts",
+            "port": 19144
+        }
+    ]
+}

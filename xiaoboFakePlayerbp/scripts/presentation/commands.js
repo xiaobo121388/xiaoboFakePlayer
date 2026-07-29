@@ -546,3 +546,4 @@ function entityArgument(value) {
 function parseSkinMode(value) {
     return value === undefined ? "default" : value === "copy_actor" || value === "default" ? value : undefined;
 }
+//# sourceMappingURL=commands.js.map

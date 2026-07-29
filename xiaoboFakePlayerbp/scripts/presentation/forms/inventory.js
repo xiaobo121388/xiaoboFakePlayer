@@ -184,3 +184,4 @@ function itemDetails(item) {
     }
     return { rawtext };
 }
+//# sourceMappingURL=inventory.js.map

@@ -20,3 +20,4 @@ export function playerLocation(player) {
         rotation: player.getRotation(),
     };
 }
+//# sourceMappingURL=playerContext.js.map

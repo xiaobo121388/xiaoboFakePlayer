@@ -44,3 +44,4 @@ export class PermissionService {
             .sort((left, right) => left.lastKnownName.localeCompare(right.lastKnownName)));
     }
 }
+//# sourceMappingURL=permissionService.js.map

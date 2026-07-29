@@ -393,3 +393,4 @@ function decodeSkinColor(payload) {
 function isUnitNumber(value) {
     return isFiniteNumber(value) && value >= 0 && value <= 1;
 }
+//# sourceMappingURL=codecs.js.map

@@ -364,3 +364,4 @@ function distanceSquared(left, right) {
 function grantFor(grants, playerId) {
     return grants.find((grant) => grant.playerId === playerId) ?? { canPlace: false, canSet: false };
 }
+//# sourceMappingURL=main.js.map

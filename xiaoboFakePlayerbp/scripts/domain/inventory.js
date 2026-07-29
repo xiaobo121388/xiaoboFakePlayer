@@ -33,3 +33,4 @@ export function fromStructureSlot(structureSlot) {
     }
     return err("INVALID_SLOT", `结构槽位 ${barrel}${slot} 未用于假人快照。`);
 }
+//# sourceMappingURL=inventory.js.map

@@ -11,3 +11,4 @@ export function isAllowed(actor, table, action) {
     }
     return grant.canSet;
 }
+//# sourceMappingURL=permissions.js.map

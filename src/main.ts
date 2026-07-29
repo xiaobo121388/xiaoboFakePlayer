@@ -27,6 +27,7 @@ const permissions = new PermissionService(stateStore);
 const recovery = new RecoveryRunner(stateStore, runtime, snapshots, coordinator, inventory);
 
 let startupStatus: StartupStatus = { state: "recovering" };
+let nextMineDiagnosticTick = 0;
 
 system.beforeEvents.startup.subscribe(({ customCommandRegistry }) => {
 	registerCommands(customCommandRegistry, {
@@ -77,6 +78,17 @@ world.afterEvents.entityDie.subscribe(({ deadEntity }) => {
 	}, 20);
 });
 
+world.afterEvents.playerBreakBlock.subscribe(({ block, player }) => {
+	const tag = player.getTags().find((candidate) => /^xiaobo_fp_fp\d{4,}$/.test(candidate));
+	if (tag === undefined) return;
+	const id = tag.slice("xiaobo_fp_".length);
+	const { x, y, z } = block.location;
+	behavior.notifyBlockBroken(id, block.dimension.id, block.location);
+	console.info(
+		`[xiaobo-fake-player] mine ${id} completed; dimension=${block.dimension.id}; target=${x},${y},${z}`,
+	);
+});
+
 system.runInterval(() => {
 	if (startupStatus.state !== "ready") return;
 	try {
@@ -95,6 +107,14 @@ system.runInterval(() => {
 	try {
 		const result = behavior.tick(system.currentTick);
 		if (!result.ok) console.error(`[xiaobo-fake-player] behavior tick failed: ${result.error.message}`);
+		else if (result.value.blockReads > 0 && system.currentTick >= nextMineDiagnosticTick) {
+			console.info(
+				`[xiaobo-fake-player] mine scan; tick=${system.currentTick}; `
+				+ `considered=${result.value.consideredTasks}; attempted=${result.value.attemptedActions}; `
+				+ `accepted=${result.value.acceptedActions}; blockReads=${result.value.blockReads}`,
+			);
+			nextMineDiagnosticTick = system.currentTick + 200;
+		}
 	} catch (cause) {
 		const message = cause instanceof Error ? cause.message : String(cause);
 		console.error(`[xiaobo-fake-player] behavior tick crashed: ${message}`);

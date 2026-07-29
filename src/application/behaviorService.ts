@@ -93,6 +93,7 @@ export class BehaviorService {
     private readonly following = new Set<FakePlayerId>();
     private readonly mineScans = new Map<FakePlayerId, MineScanState>();
     private readonly mineTargets = new Map<FakePlayerId, CachedMineTarget>();
+    private readonly activeMineTargets = new Map<FakePlayerId, CachedMineTarget>();
     private lastTaskKey: string | undefined;
 
     public constructor(
@@ -136,8 +137,7 @@ export class BehaviorService {
         const lease = this.coordinator.tryAcquire([`fake:${id}`]);
         if (!lease.ok) return lease;
         try {
-            const receipt = this.runtime.perform(id, mapped.value);
-            if (receipt.accepted && receipt.inventoryChanged === true) this.inventory.markDirty(id);
+            const receipt = this.executeRuntime(id, mapped.value);
             return receipt.accepted
                 ? ok(receipt)
                 : err("CONFLICT", `假人 ${id} 未接受 ${action.kind} 动作。`);
@@ -199,6 +199,17 @@ export class BehaviorService {
         }
     }
 
+    public notifyBlockBroken(id: FakePlayerId, dimension: DimensionKey, position: Point): void {
+        const activeTarget = this.activeMineTargets.get(id);
+        if (activeTarget === undefined
+            || activeTarget.dimension !== dimension
+            || activeTarget.position.x !== position.x
+            || activeTarget.position.y !== position.y
+            || activeTarget.position.z !== position.z) return;
+        this.activeMineTargets.delete(id);
+        this.mineTargets.delete(id);
+    }
+
     public tick(currentTick: number): Result<BehaviorTickReport> {
         if (!Number.isSafeInteger(currentTick) || currentTick < 0) {
             return err("INVALID_STATE", "行为调度 tick 必须是非负安全整数。");
@@ -228,6 +239,7 @@ export class BehaviorService {
         let blockReads = 0;
         for (const task of rotated) {
             if (attemptedActions >= MAX_AUTOMATIC_ACTIONS_PER_TICK) break;
+            if (task.kind !== "mine" && this.activeMineTargets.has(task.record.id)) continue;
             if ((this.nextDueTicks.get(task.key) ?? 0) > currentTick || actedIds.has(task.record.id)) continue;
             if (task.kind === "mine" && blockReads >= MAX_BLOCK_READS_PER_TICK) continue;
             this.lastTaskKey = task.key;
@@ -323,12 +335,34 @@ export class BehaviorService {
     private runMine(record: FakePlayerRecord, blockBudget: number): AutomaticBehaviorOutcome {
         const runtime = this.runtime.get(record.id);
         if (runtime === undefined || blockBudget <= 0) return emptyOutcome(true);
-        const resolved = this.resolveMineTarget(record, runtime.position, runtime.dimension, blockBudget);
+        let blockReads = 0;
+        const activeTarget = this.activeMineTargets.get(record.id);
+        if (activeTarget !== undefined && activeTarget.dimension === runtime.dimension) {
+            const info = this.worldQueries.getBlockInfo(activeTarget.dimension, activeTarget.position);
+            blockReads += 1;
+            if (isMineTarget(info, record.behavior.mine.blockTypeId)) {
+                return { attempted: false, accepted: false, blockReads };
+            }
+        }
+        if (activeTarget !== undefined) {
+            this.activeMineTargets.delete(record.id);
+            this.mineTargets.delete(record.id);
+        }
+        if (blockReads >= blockBudget) {
+            return { attempted: false, accepted: false, blockReads, continueNextTick: true };
+        }
+        const resolved = this.resolveMineTarget(
+            record,
+            runtime.position,
+            runtime.dimension,
+            blockBudget - blockReads,
+        );
+        blockReads += resolved.blockReads;
         if (resolved.target === undefined) {
             return {
                 attempted: false,
                 accepted: false,
-                blockReads: resolved.blockReads,
+                blockReads,
                 continueNextTick: resolved.scanPending,
             };
         }
@@ -344,17 +378,18 @@ export class BehaviorService {
                 position: target,
                 face: mineTargetFace(runtime.position, target),
             });
-            return { attempted: true, accepted: receipt.accepted, blockReads: resolved.blockReads };
+            if (receipt.accepted) this.activeMineTargets.set(record.id, resolved.target);
+            return { attempted: true, accepted: receipt.accepted, blockReads };
         }
         if (!record.behavior.mine.approach) {
-            return { attempted: false, accepted: false, blockReads: resolved.blockReads };
+            return { attempted: false, accepted: false, blockReads };
         }
         const receipt = this.executeRuntime(record.id, {
             kind: "navigate",
             position: { x: target.x + 0.5, y: target.y + 1, z: target.z + 0.5 },
             speed: 1,
         });
-        return { attempted: true, accepted: receipt.accepted, blockReads: resolved.blockReads };
+        return { attempted: true, accepted: receipt.accepted, blockReads };
     }
 
     private resolveMineTarget(
@@ -425,6 +460,7 @@ export class BehaviorService {
 
     private executeRuntime(id: FakePlayerId, action: RuntimeFakePlayerAction): RuntimeActionReceipt {
         const receipt = this.runtime.perform(id, action);
+        if (receipt.accepted && interruptsMining(action.kind)) this.activeMineTargets.delete(id);
         if (receipt.accepted && receipt.inventoryChanged === true) this.inventory.markDirty(id);
         return receipt;
     }
@@ -437,6 +473,7 @@ export class BehaviorService {
         this.following.delete(id);
         this.mineScans.delete(id);
         this.mineTargets.delete(id);
+        this.activeMineTargets.delete(id);
     }
 
     private removeInactiveRuntimeState(tasks: readonly BehaviorTask[]): void {
@@ -454,11 +491,24 @@ export class BehaviorService {
         for (const id of this.mineTargets.keys()) {
             if (!activeIds.has(id)) this.mineTargets.delete(id);
         }
+        for (const id of this.activeMineTargets.keys()) {
+            if (!activeIds.has(id)) this.activeMineTargets.delete(id);
+        }
     }
 }
 
 function emptyOutcome(continueNextTick = false): AutomaticBehaviorOutcome {
     return { attempted: false, accepted: false, blockReads: 0, continueNextTick };
+}
+
+function interruptsMining(kind: RuntimeFakePlayerAction["kind"]): boolean {
+    return kind === "break_block"
+        || kind === "interact_block"
+        || kind === "interact_entity"
+        || kind === "stop"
+        || kind === "teleport"
+        || kind === "use_item"
+        || kind === "use_item_on_block";
 }
 
 function behaviorConfigsEqual(left: BehaviorConfig, right: BehaviorConfig): boolean {

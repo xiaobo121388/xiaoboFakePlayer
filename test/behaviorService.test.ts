@@ -472,3 +472,113 @@ test("automatic mine search consumes at most 256 unique block reads per tick and
     assert.equal(new Set(fixture.queries.blockReads.map(({ x, y, z }) => `${x}:${y}:${z}`)).size, 512);
     assert.equal(fixture.runtime.actions.length, 0);
 });
+
+test("automatic mining starts once and waits for the block to finish breaking", () => {
+    const fixture = createFixture();
+    const operator = { playerId: "operator", isOperator: true };
+    const config = {
+        ...createDefaultBehaviorConfig(),
+        mine: {
+            enabled: true,
+            intervalTicks: 1,
+            direction: "front" as const,
+            blockTypeId: "minecraft:stone",
+            searchRadius: 0,
+            approach: false,
+        },
+    };
+    fixture.queries.blockInfo = { typeId: "minecraft:stone", solid: true };
+    assert.equal(fixture.service.updateBehaviorConfig(
+        operator,
+        fixture.record.id,
+        4,
+        fixture.record.behavior,
+        config,
+    ).ok, true);
+    fixture.runtime.actions.length = 0;
+
+    assert.equal(fixture.service.tick(0).ok, true);
+    assert.equal(fixture.service.tick(1).ok, true);
+    assert.equal(fixture.runtime.actions.filter(({ kind }) => kind === "break_block").length, 1);
+
+    fixture.service.notifyBlockBroken(
+        fixture.record.id,
+        "minecraft:overworld",
+        { x: 0, y: 65, z: 1 },
+    );
+    assert.equal(fixture.service.tick(2).ok, true);
+    assert.equal(fixture.runtime.actions.filter(({ kind }) => kind === "break_block").length, 2);
+});
+
+test("automatic mining restarts after a manual stop interrupts the active block", () => {
+    const fixture = createFixture();
+    const operator = { playerId: "operator", isOperator: true };
+    const config = {
+        ...createDefaultBehaviorConfig(),
+        mine: {
+            enabled: true,
+            intervalTicks: 1,
+            direction: "front" as const,
+            blockTypeId: "minecraft:stone",
+            searchRadius: 0,
+            approach: false,
+        },
+    };
+    fixture.queries.blockInfo = { typeId: "minecraft:stone", solid: true };
+    const updated = fixture.service.updateBehaviorConfig(
+        operator,
+        fixture.record.id,
+        4,
+        fixture.record.behavior,
+        config,
+    );
+    assert.equal(updated.ok, true);
+    if (!updated.ok) throw new Error("behavior update failed");
+    fixture.runtime.actions.length = 0;
+
+    assert.equal(fixture.service.tick(0).ok, true);
+    assert.equal(fixture.service.perform(operator, fixture.record.id, updated.value.recordRevision, {
+        kind: "stop",
+    }).ok, true);
+    assert.equal(fixture.service.tick(1).ok, true);
+    assert.equal(fixture.runtime.actions.filter(({ kind }) => kind === "break_block").length, 2);
+});
+
+test("automatic mining blocks automatic item use until the active block is broken", () => {
+    const fixture = createFixture();
+    const operator = { playerId: "operator", isOperator: true };
+    const config = {
+        ...createDefaultBehaviorConfig(),
+        mine: {
+            enabled: true,
+            intervalTicks: 1,
+            direction: "front" as const,
+            blockTypeId: "minecraft:stone",
+            searchRadius: 0,
+            approach: false,
+        },
+        use: { enabled: true, intervalTicks: 1, slot: 0 },
+    };
+    fixture.queries.blockInfo = { typeId: "minecraft:stone", solid: true };
+    assert.equal(fixture.service.updateBehaviorConfig(
+        operator,
+        fixture.record.id,
+        4,
+        fixture.record.behavior,
+        config,
+    ).ok, true);
+    fixture.runtime.actions.length = 0;
+
+    assert.equal(fixture.service.tick(0).ok, true);
+    assert.equal(fixture.service.tick(1).ok, true);
+    assert.deepEqual(fixture.runtime.actions.map(({ kind }) => kind), ["break_block"]);
+    fixture.service.notifyBlockBroken(
+        fixture.record.id,
+        "minecraft:overworld",
+        { x: 0, y: 65, z: 1 },
+    );
+    assert.equal(fixture.service.tick(2).ok, true);
+    assert.equal(fixture.runtime.actions.at(-1)?.kind, "use_item");
+    assert.equal(fixture.service.tick(3).ok, true);
+    assert.equal(fixture.runtime.actions.filter(({ kind }) => kind === "break_block").length, 2);
+});

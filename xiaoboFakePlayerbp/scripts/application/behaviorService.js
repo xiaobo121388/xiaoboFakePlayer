@@ -18,6 +18,7 @@ export class BehaviorService {
     following = new Set();
     mineScans = new Map();
     mineTargets = new Map();
+    activeMineTargets = new Map();
     lastTaskKey;
     constructor(stateStore, runtime, worldQueries, coordinator, inventory) {
         this.stateStore = stateStore;
@@ -59,9 +60,7 @@ export class BehaviorService {
         if (!lease.ok)
             return lease;
         try {
-            const receipt = this.runtime.perform(id, mapped.value);
-            if (receipt.accepted && receipt.inventoryChanged === true)
-                this.inventory.markDirty(id);
+            const receipt = this.executeRuntime(id, mapped.value);
             return receipt.accepted
                 ? ok(receipt)
                 : err("CONFLICT", `假人 ${id} 未接受 ${action.kind} 动作。`);
@@ -121,6 +120,17 @@ export class BehaviorService {
             lease.value.release();
         }
     }
+    notifyBlockBroken(id, dimension, position) {
+        const activeTarget = this.activeMineTargets.get(id);
+        if (activeTarget === undefined
+            || activeTarget.dimension !== dimension
+            || activeTarget.position.x !== position.x
+            || activeTarget.position.y !== position.y
+            || activeTarget.position.z !== position.z)
+            return;
+        this.activeMineTargets.delete(id);
+        this.mineTargets.delete(id);
+    }
     tick(currentTick) {
         if (!Number.isSafeInteger(currentTick) || currentTick < 0) {
             return err("INVALID_STATE", "行为调度 tick 必须是非负安全整数。");
@@ -151,6 +161,8 @@ export class BehaviorService {
         for (const task of rotated) {
             if (attemptedActions >= MAX_AUTOMATIC_ACTIONS_PER_TICK)
                 break;
+            if (task.kind !== "mine" && this.activeMineTargets.has(task.record.id))
+                continue;
             if ((this.nextDueTicks.get(task.key) ?? 0) > currentTick || actedIds.has(task.record.id))
                 continue;
             if (task.kind === "mine" && blockReads >= MAX_BLOCK_READS_PER_TICK)
@@ -241,12 +253,29 @@ export class BehaviorService {
         const runtime = this.runtime.get(record.id);
         if (runtime === undefined || blockBudget <= 0)
             return emptyOutcome(true);
-        const resolved = this.resolveMineTarget(record, runtime.position, runtime.dimension, blockBudget);
+        let blockReads = 0;
+        const activeTarget = this.activeMineTargets.get(record.id);
+        if (activeTarget !== undefined && activeTarget.dimension === runtime.dimension) {
+            const info = this.worldQueries.getBlockInfo(activeTarget.dimension, activeTarget.position);
+            blockReads += 1;
+            if (isMineTarget(info, record.behavior.mine.blockTypeId)) {
+                return { attempted: false, accepted: false, blockReads };
+            }
+        }
+        if (activeTarget !== undefined) {
+            this.activeMineTargets.delete(record.id);
+            this.mineTargets.delete(record.id);
+        }
+        if (blockReads >= blockBudget) {
+            return { attempted: false, accepted: false, blockReads, continueNextTick: true };
+        }
+        const resolved = this.resolveMineTarget(record, runtime.position, runtime.dimension, blockBudget - blockReads);
+        blockReads += resolved.blockReads;
         if (resolved.target === undefined) {
             return {
                 attempted: false,
                 accepted: false,
-                blockReads: resolved.blockReads,
+                blockReads,
                 continueNextTick: resolved.scanPending,
             };
         }
@@ -257,17 +286,19 @@ export class BehaviorService {
                 position: target,
                 face: mineTargetFace(runtime.position, target),
             });
-            return { attempted: true, accepted: receipt.accepted, blockReads: resolved.blockReads };
+            if (receipt.accepted)
+                this.activeMineTargets.set(record.id, resolved.target);
+            return { attempted: true, accepted: receipt.accepted, blockReads };
         }
         if (!record.behavior.mine.approach) {
-            return { attempted: false, accepted: false, blockReads: resolved.blockReads };
+            return { attempted: false, accepted: false, blockReads };
         }
         const receipt = this.executeRuntime(record.id, {
             kind: "navigate",
             position: { x: target.x + 0.5, y: target.y + 1, z: target.z + 0.5 },
             speed: 1,
         });
-        return { attempted: true, accepted: receipt.accepted, blockReads: resolved.blockReads };
+        return { attempted: true, accepted: receipt.accepted, blockReads };
     }
     resolveMineTarget(record, runtimePosition, dimension, blockBudget) {
         const config = record.behavior.mine;
@@ -330,6 +361,8 @@ export class BehaviorService {
     }
     executeRuntime(id, action) {
         const receipt = this.runtime.perform(id, action);
+        if (receipt.accepted && interruptsMining(action.kind))
+            this.activeMineTargets.delete(id);
         if (receipt.accepted && receipt.inventoryChanged === true)
             this.inventory.markDirty(id);
         return receipt;
@@ -343,6 +376,7 @@ export class BehaviorService {
         this.following.delete(id);
         this.mineScans.delete(id);
         this.mineTargets.delete(id);
+        this.activeMineTargets.delete(id);
     }
     removeInactiveRuntimeState(tasks) {
         const activeKeys = new Set(tasks.map((task) => task.key));
@@ -363,10 +397,23 @@ export class BehaviorService {
             if (!activeIds.has(id))
                 this.mineTargets.delete(id);
         }
+        for (const id of this.activeMineTargets.keys()) {
+            if (!activeIds.has(id))
+                this.activeMineTargets.delete(id);
+        }
     }
 }
 function emptyOutcome(continueNextTick = false) {
     return { attempted: false, accepted: false, blockReads: 0, continueNextTick };
+}
+function interruptsMining(kind) {
+    return kind === "break_block"
+        || kind === "interact_block"
+        || kind === "interact_entity"
+        || kind === "stop"
+        || kind === "teleport"
+        || kind === "use_item"
+        || kind === "use_item_on_block";
 }
 function behaviorConfigsEqual(left, right) {
     return JSON.stringify(left) === JSON.stringify(right);

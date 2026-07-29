@@ -150,10 +150,14 @@ export class BehaviorService {
         actor: ActorIdentity,
         id: FakePlayerId,
         expectedRecordRevision: number,
+        expectedConfig: BehaviorConfig,
         config: BehaviorConfig,
     ): Result<FakePlayerRecord> {
+        const normalizedExpected = decodeBehaviorConfig(expectedConfig);
         const normalized = decodeBehaviorConfig(config);
-        if (normalized === undefined) return err("INVALID_STATE", "自动行为配置无效。");
+        if (normalizedExpected === undefined || normalized === undefined) {
+            return err("INVALID_STATE", "自动行为配置无效。");
+        }
         const permissions = this.stateStore.loadPermissions();
         if (!permissions.ok) return err("CONFLICT", permissions.diagnostics.join("; "));
         if (!isAllowed(actor, permissions.state.value, "manage")) {
@@ -168,7 +172,8 @@ export class BehaviorService {
             if (!catalog.ok) return err("CONFLICT", catalog.diagnostics.join("; "));
             const record = catalog.state.value.records[id];
             if (record === undefined) return err("NOT_FOUND", `未找到假人 ${id}。`);
-            if (record.recordRevision !== expectedRecordRevision) {
+            if (record.recordRevision !== expectedRecordRevision
+                && !behaviorConfigsEqual(record.behavior, normalizedExpected)) {
                 return err(
                     "STALE_REVISION",
                     `期望 revision ${expectedRecordRevision}，实际为 ${record.recordRevision}。`,

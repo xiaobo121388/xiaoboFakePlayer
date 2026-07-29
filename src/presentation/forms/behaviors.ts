@@ -212,6 +212,7 @@ async function saveBehavior(
         actorIdentity(player),
         record.id,
         record.recordRevision,
+        record.behavior,
         config,
     );
     if (!result.ok) return sendError(player, result.error.message);

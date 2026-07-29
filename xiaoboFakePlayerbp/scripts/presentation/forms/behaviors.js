@@ -159,7 +159,7 @@ async function openUseForm(player, services, record, openDetail) {
     }, openDetail);
 }
 async function saveBehavior(player, services, record, config, openDetail) {
-    const result = services.behavior.updateBehaviorConfig(actorIdentity(player), record.id, record.recordRevision, config);
+    const result = services.behavior.updateBehaviorConfig(actorIdentity(player), record.id, record.recordRevision, record.behavior, config);
     if (!result.ok)
         return sendError(player, result.error.message);
     player.sendMessage({ translate: "xiaobo.fp.message.saved", with: [result.value.name] });

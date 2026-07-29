@@ -224,8 +224,8 @@ export class StructureInventorySnapshotStore implements InventorySnapshotStore {
             return err("CONFLICT", "存在未恢复的结构工作区，暂不能执行库存操作。");
         }
         const origin = workspaceOrigin(dimension, near);
-        if (dimension.getBlock(origin) === undefined || dimension.getBlock(offset(origin, 1, 0, 0)) === undefined) {
-            return err("INVALID_STATE", "假人所在区块的结构工作区未加载。");
+        if (!workspaceIsLoaded(dimension, origin)) {
+            return err("WORLD_NOT_READY", "假人所在区块的结构工作区未加载。");
         }
         const backupStructureId = `xiaobo:workspace_${safeId(operationId)}`;
         const existing = world.structureManager.get(backupStructureId);
@@ -277,6 +277,9 @@ export class StructureInventorySnapshotStore implements InventorySnapshotStore {
         }
         if (backup !== undefined) {
             const dimension = world.getDimension(operation.dimension);
+            if (!workspaceIsLoaded(dimension, operation.origin)) {
+                return err("WORLD_NOT_READY", `工作区 ${operation.id} 所在区块尚未加载。`);
+            }
             clearBarrelsIfPresent(dimension, operation.origin);
             world.structureManager.place(backup, dimension, operation.origin, {
                 includeBlocks: true,
@@ -297,6 +300,11 @@ export class StructureInventorySnapshotStore implements InventorySnapshotStore {
         });
         return committed.ok ? ok(undefined) : committed;
     }
+}
+
+function workspaceIsLoaded(dimension: Dimension, origin: Vector3): boolean {
+    return dimension.getBlock(origin) !== undefined
+        && dimension.getBlock(offset(origin, 1, 0, 0)) !== undefined;
 }
 
 export function readPlayerImage(

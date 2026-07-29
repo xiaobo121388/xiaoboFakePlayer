@@ -120,7 +120,7 @@ prepared -> staged -> applying -> committed -> checkpointed
 
 `domain/capabilities.ts` 是用户可见能力的单一数据源。状态分为：
 
-- `enabled`：代码路径已实现；标记 `bedrock_26_34_required` 的项目仍需实机发布验收。
+- `enabled`：代码路径已实现；标记 `bedrock_26_33_required` 的项目仍需实机发布验收。
 - `hidden_pending_game_validation`：精确类型或概念存在，但 Forms 和命令默认不注册入口。
 - `unsupported`：公开 API 没有可靠等价，不提供反射、固定延时或命令伪装。
 

@@ -1,10 +1,10 @@
 # 小波挂机假人
 
-将网易版“挂机假人”的核心管理能力迁移到国际版 Minecraft Bedrock 26.34。实现基于公开 Script API 与 `SimulatedPlayer`，不读取网易世界的 ExtraData，也不依赖隐藏 GameTest、私有 NBT 或跨 Mod Python OpenAPI。
+将网易版“挂机假人”的核心管理能力迁移到国际版 Minecraft Bedrock 1.26.33。实现基于公开 Script API 与 `SimulatedPlayer`，不读取网易世界的 ExtraData，也不依赖隐藏 GameTest、私有 NBT 或跨 Mod Python OpenAPI。
 
 ## 运行要求
 
-- Minecraft Bedrock 正式版 26.34。
+- Minecraft Bedrock 正式版 1.26.33。
 - 世界必须启用 **Beta APIs** 实验。
 - 行为包和资源包必须同时启用。
 - 开发构建需要 Node.js 22 或更高版本。
@@ -13,9 +13,9 @@
 
 | 模块 | 版本 |
 |---|---|
-| `@minecraft/server` | `2.9.0-beta.1.26.34-stable` |
-| `@minecraft/server-ui` | `2.2.0-beta.1.26.34-stable` |
-| `@minecraft/server-gametest` | `1.0.0-beta.1.26.34-stable` |
+| `@minecraft/server` | `2.9.0-beta.1.26.33-stable` |
+| `@minecraft/server-ui` | `2.2.0-beta.1.26.33-stable` |
+| `@minecraft/server-gametest` | `1.0.0-beta.1.26.33-stable` |
 
 未来游戏版本可能改变 Beta API 行为。升级版本前应更新依赖并重新执行自动测试和实机验收矩阵。
 
@@ -118,15 +118,17 @@ Forms 是完整管理入口，命令和 Forms 调用相同的应用用例与权�
 
 若启动恢复发现损坏 bank、非法生命周期组合或无法判定的物品冲突，系统会阻止普通写操作。OP 可使用 `/xiaobo:fp_diagnose` 查看只读状态，并在系统 ready 时通过恢复中心沿原状态机重试。恢复中心不会提供任意跳阶段、覆盖槽位或删除唯一快照的按钮。
 
+重进世界时，假人或遗留结构工作区所在区块可能晚于脚本完成加载。系统会保持 `recovering` 并每秒按真实区块可读性重试，区块就绪后继续幂等恢复；只有持久数据冲突或引擎异常才进入只读隔离。
+
 ## 能力矩阵
 
-源码中的 `CAPABILITY_MATRIX` 固定到 Bedrock 26.34，并控制未验证功能是否出现在 Forms 和命令中。
+源码中的 `CAPABILITY_MATRIX` 固定到 Bedrock 1.26.33，并控制未验证功能是否出现在 Forms 和命令中。
 
 | 能力 | 当前状态 | 说明 |
 |---|---|---|
-| 模拟玩家生命周期 | 已实现，需 26.34 实机验收 | 顶层生成、断开、复活和稳定标签重绑定 |
-| 41 槽结构快照 | 已实现，需 26.34 实机验收 | Node 测试覆盖事务；ItemStack 组件保真必须实机验证 |
-| Persona 皮肤复制 | 已实现，需 26.34 实机验收 | 保存公开 Persona 部件、手臂尺寸和肤色 |
+| 模拟玩家生命周期 | 已实现，需 1.26.33 实机验收 | 顶层生成、断开、复活和稳定标签重绑定 |
+| 41 槽结构快照 | 已实现，需 1.26.33 实机验收 | Node 测试覆盖事务；ItemStack 组件保真必须实机验证 |
+| Persona 皮肤复制 | 已实现，需 1.26.33 实机验收 | 保存公开 Persona 部件、手臂尺寸和肤色 |
 | 经典皮肤纹理复制 | 不支持 | `PlayerSkinData` 不公开纹理；明确回退默认皮肤 |
 | 潜行 | 隐藏，待实机验证 | 精确类型可写，但发布入口默认关闭 |
 | 饥饿/饱和度写入 | 隐藏，待实机验证 | 组件存在，写入语义尚未验收 |
@@ -138,7 +140,7 @@ Forms 是完整管理入口，命令和 Forms 调用相同的应用用例与权�
 
 ## 实机发布门槛
 
-自动检查通过并不等于 Minecraft 引擎契约已经验收。发布前至少在 Bedrock 26.34 正式版验证：
+自动检查通过并不等于 Minecraft 引擎契约已经验收。发布前至少在 Bedrock 1.26.33 正式版验证：
 
 1. 主世界、下界和末地的创建、重进世界、重命名、下线、上线和复活。
 2. 附魔耐久工具、重命名/Lore 物品、护甲、副手、书、染色物品和容器物品的 41 槽往返。

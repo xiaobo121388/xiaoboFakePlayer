@@ -6,7 +6,8 @@ export type DomainErrorCode =
     | "INVALID_STATE"
     | "NOT_FOUND"
     | "PERMISSION_DENIED"
-    | "STALE_REVISION";
+    | "STALE_REVISION"
+    | "WORLD_NOT_READY";
 
 export interface DomainError {
     readonly code: DomainErrorCode;

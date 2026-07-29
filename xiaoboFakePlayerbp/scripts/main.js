@@ -5,6 +5,7 @@ import { LifecycleService } from "./application/lifecycleService.js";
 import { OperationCoordinator } from "./application/operationCoordinator.js";
 import { PermissionService } from "./application/permissionService.js";
 import { RecoveryRunner } from "./application/recoveryRunner.js";
+import { startRecovery } from "./application/startupRecovery.js";
 import { SapiFakePlayerRuntime } from "./infrastructure/sapi/fakePlayerRuntime.js";
 import { SapiInventoryAccess } from "./infrastructure/sapi/inventoryAccess.js";
 import { StructureInventorySnapshotStore } from "./infrastructure/sapi/structureInventorySnapshotStore.js";
@@ -34,23 +35,22 @@ system.beforeEvents.startup.subscribe(({ customCommandRegistry }) => {
 });
 world.afterEvents.worldLoad.subscribe(() => {
     system.run(() => {
-        try {
-            const result = recovery.run();
-            if (!result.ok) {
-                startupStatus = { state: "blocked", message: result.error.message };
-                console.error(`[xiaobo-fake-player] recovery blocked: ${result.error.message}`);
-                return;
-            }
-            startupStatus = { state: "ready" };
-            console.info(`[xiaobo-fake-player] ready; rebound=${result.value.reboundEntities}; `
-                + `records=${result.value.recoveredRecords}; transfers=${result.value.recoveredTransfers}`);
-            result.value.diagnostics.forEach((diagnostic) => console.warn(`[xiaobo-fake-player] ${diagnostic}`));
-        }
-        catch (cause) {
-            const message = cause instanceof Error ? cause.message : String(cause);
-            startupStatus = { state: "blocked", message };
-            console.error(`[xiaobo-fake-player] recovery crashed: ${message}`);
-        }
+        startRecovery(recovery, {
+            scheduleRetry: (retry) => {
+                system.runTimeout(retry, 20);
+            },
+            updateStatus: (status) => {
+                startupStatus = status;
+            },
+            onReady: (summary) => {
+                console.info(`[xiaobo-fake-player] ready; rebound=${summary.reboundEntities}; `
+                    + `records=${summary.recoveredRecords}; transfers=${summary.recoveredTransfers}`);
+                summary.diagnostics.forEach((diagnostic) => console.warn(`[xiaobo-fake-player] ${diagnostic}`));
+            },
+            onBlocked: (message) => {
+                console.error(`[xiaobo-fake-player] recovery blocked: ${message}`);
+            },
+        });
     });
 });
 world.afterEvents.entityDie.subscribe(({ deadEntity }) => {

@@ -1,25 +1,25 @@
 export const CAPABILITY_MATRIX = {
-    gameVersion: "26.34",
-    serverVersion: "2.9.0-beta.1.26.34-stable",
-    serverUiVersion: "2.2.0-beta.1.26.34-stable",
-    gameTestVersion: "1.0.0-beta.1.26.34-stable",
+    gameVersion: "1.26.33",
+    serverVersion: "2.9.0-beta.1.26.33-stable",
+    serverUiVersion: "2.2.0-beta.1.26.33-stable",
+    gameTestVersion: "1.0.0-beta.1.26.33-stable",
     capabilities: [
         {
             id: "simulated_player",
             availability: "enabled",
-            verification: "bedrock_26_34_required",
+            verification: "bedrock_26_33_required",
             detail: "spawnSimulatedPlayer 生命周期与稳定标签重绑定已实现。",
         },
         {
             id: "structure_inventory_snapshot",
             availability: "enabled",
-            verification: "bedrock_26_34_required",
+            verification: "bedrock_26_33_required",
             detail: "41 槽两木桶结构快照和崩溃恢复已实现。",
         },
         {
             id: "persona_skin_copy",
             availability: "enabled",
-            verification: "bedrock_26_34_required",
+            verification: "bedrock_26_33_required",
             detail: "公开 Persona 部件、手臂尺寸和肤色可保存并恢复。",
         },
         {
@@ -31,19 +31,19 @@ export const CAPABILITY_MATRIX = {
         {
             id: "sneaking",
             availability: "hidden_pending_game_validation",
-            verification: "bedrock_26_34_required",
-            detail: "精确类型可写，但发布入口等待正式版 26.34 实机验证。",
+            verification: "bedrock_26_33_required",
+            detail: "精确类型可写，但发布入口等待正式版 1.26.33 实机验证。",
         },
         {
             id: "hunger_saturation_write",
             availability: "hidden_pending_game_validation",
-            verification: "bedrock_26_34_required",
-            detail: "公开组件存在，但写入语义尚未通过正式版 26.34 实机验证。",
+            verification: "bedrock_26_33_required",
+            detail: "公开组件存在，但写入语义尚未通过正式版 1.26.33 实机验证。",
         },
         {
             id: "automatic_fishing",
             availability: "hidden_pending_game_validation",
-            verification: "bedrock_26_34_required",
+            verification: "bedrock_26_33_required",
             detail: "尚未证明可可靠关联钓鱼钩和收杆时机，不提供固定延时假实现。",
         },
         {

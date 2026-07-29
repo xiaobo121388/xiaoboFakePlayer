@@ -90,7 +90,7 @@ export function registerCommands(registry, services) {
         }
         const startup = services.getStartupStatus();
         const lines = [
-            `§b小波挂机假人诊断§r 26.34 / ${CAPABILITY_MATRIX.serverVersion}`,
+            `§b小波挂机假人诊断§r ${CAPABILITY_MATRIX.gameVersion} / ${CAPABILITY_MATRIX.serverVersion}`,
             `startup=${startup.state}${startup.message === undefined ? "" : ` (${startup.message})`}`,
         ];
         const listed = services.lifecycle.list(actor);

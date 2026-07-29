@@ -485,6 +485,7 @@ export class BehaviorService {
                     diagnostic: describeMine(record, "no_target", scan.origin),
                 };
             }
+            if (config.direction === "front" && offset.y !== 0) continue;
             const position = addPoints(scan.origin, offset);
             const info = this.worldQueries.getBlockInfo(dimension, position);
             blockReads += 1;

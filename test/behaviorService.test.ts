@@ -477,13 +477,13 @@ test("automatic mine search consumes at most 256 unique block reads per tick and
     if (first.ok) assert.equal(first.value.blockReads, 256);
     const second = fixture.service.tick(1);
     assert.equal(second.ok, true);
-    if (second.ok) assert.equal(second.value.blockReads, 256);
-    assert.equal(fixture.queries.blockReads.length, 512);
-    assert.equal(new Set(fixture.queries.blockReads.map(({ x, y, z }) => `${x}:${y}:${z}`)).size, 512);
+    if (second.ok) assert.equal(second.value.blockReads, 185);
+    assert.equal(fixture.queries.blockReads.length, 441);
+    assert.equal(new Set(fixture.queries.blockReads.map(({ x, y, z }) => `${x}:${y}:${z}`)).size, 441);
     assert.equal(fixture.runtime.actions.length, 0);
 });
 
-test("automatic mine searches the configured radius when the block ID is empty", () => {
+test("automatic front mine searches its horizontal plane instead of blocks below", () => {
     const fixture = createFixture();
     const operator = { playerId: "operator", isOperator: true };
     const config = {
@@ -498,6 +498,7 @@ test("automatic mine searches the configured radius when the block ID is empty",
         },
     };
     fixture.queries.blockInfoByPosition.set("-1:63:0", { typeId: "minecraft:stone", solid: true });
+    fixture.queries.blockInfoByPosition.set("-1:64:0", { typeId: "minecraft:stone", solid: true });
     assert.equal(fixture.service.updateBehaviorConfig(
         operator,
         fixture.record.id,
@@ -510,8 +511,8 @@ test("automatic mine searches the configured radius when the block ID is empty",
     assert.equal(fixture.service.tick(0).ok, true);
     assert.deepEqual(fixture.runtime.actions.at(-1), {
         kind: "break_block",
-        position: { x: -1, y: 63, z: 0 },
-        face: "up",
+        position: { x: -1, y: 64, z: 0 },
+        face: "down",
     });
 });
 
@@ -529,9 +530,9 @@ test("automatic mine skips hidden search candidates when approach is disabled", 
             approach: false,
         },
     };
-    fixture.queries.blockInfoByPosition.set("-1:63:0", { typeId: "minecraft:stone", solid: true });
-    fixture.queries.blockInfoByPosition.set("0:63:0", { typeId: "minecraft:stone", solid: true });
-    fixture.queries.hiddenBlocks.add("-1:63:0");
+    fixture.queries.blockInfoByPosition.set("-1:64:0", { typeId: "minecraft:stone", solid: true });
+    fixture.queries.blockInfoByPosition.set("0:64:0", { typeId: "minecraft:stone", solid: true });
+    fixture.queries.hiddenBlocks.add("-1:64:0");
     assert.equal(fixture.service.updateBehaviorConfig(
         operator,
         fixture.record.id,
@@ -544,8 +545,8 @@ test("automatic mine skips hidden search candidates when approach is disabled", 
     assert.equal(fixture.service.tick(0).ok, true);
     assert.deepEqual(fixture.runtime.actions.at(-1), {
         kind: "break_block",
-        position: { x: 0, y: 63, z: 0 },
-        face: "up",
+        position: { x: 0, y: 64, z: 0 },
+        face: "down",
     });
 });
 

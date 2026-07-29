@@ -26,3 +26,4 @@ export function sendError(player, message) {
 export function t(key) {
     return { translate: key };
 }
+//# sourceMappingURL=formSupport.js.map

@@ -250,3 +250,4 @@ function toPlayerSkinData(skin) {
         ...(skin.skinColor === undefined ? {} : { skinColor: skin.skinColor }),
     };
 }
+//# sourceMappingURL=fakePlayerRuntime.js.map

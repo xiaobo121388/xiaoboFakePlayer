@@ -40,6 +40,23 @@ npm test
 npm run build
 ```
 
+## 脚本调试
+
+项目已按 Mojang 官方 [Minecraft Bedrock Debugger](https://marketplace.visualstudio.com/items?itemName=mojang-studios.minecraft-debugger) 配置 TypeScript 源码调试。VS Code 会推荐安装该扩展；调试器的官方说明见 [Script developer tools](https://learn.microsoft.com/minecraft/creator/documents/scripting/developer-tools?view=minecraft-bedrock-stable)。
+
+同一台 Windows 电脑首次连接正式版 Minecraft Bedrock 前，需要在管理员终端添加官方要求的回环豁免：
+
+```powershell
+CheckNetIsolation.exe LoopbackExempt -a -p=S-1-15-2-1958404141-86561845-1752920682-3514627264-368642714-62675701-733520436
+```
+
+1. 在 VS Code 的“运行和调试”中选择 `Minecraft Bedrock: Listen` 并按 F5。预启动任务会构建源码，并用 `robocopy /MIR` 将两个完整开发包同步到 Minecraft Bedrock 开发目录。
+2. 进入已启用本行为包的世界。世界需要开启作弊，执行者需要拥有 2 级命令权限。
+3. 在游戏聊天栏执行 `/script debugger connect localhost 19144`。出现 `Debugger connected to host` 后，可直接在 `src/**/*.ts` 中使用断点、单步、局部变量和监视。
+4. 调试结束后执行 `/script debugger close`，或在 VS Code 中停止调试。
+
+端口 `19144` 是官方默认脚本调试端口。配置通过脚本模块 UUID 锁定本行为包，避免同时启用多个脚本包时连接到错误目标。调试器不支持修改变量状态或立即执行模式。
+
 ## 已实现能力
 
 - 最多 10 个假人，使用 `fp0001` 形式的持久稳定 ID，并自动处理重名。

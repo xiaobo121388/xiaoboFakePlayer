@@ -1,0 +1,47 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "minecraft: build",
+            "type": "npm",
+            "script": "build",
+            "problemMatcher": "$tsc"
+        },
+        {
+            "label": "minecraft: deploy behavior pack",
+            "type": "process",
+            "command": "powershell.exe",
+            "args": [
+                "-NoProfile",
+                "-Command",
+                "& robocopy.exe '${workspaceFolder}\\xiaoboFakePlayerbp' '${env:APPDATA}\\Minecraft Bedrock\\Users\\Shared\\games\\com.mojang\\development_behavior_packs\\xiaoboFakePlayerbp' /MIR; if ($LASTEXITCODE -ge 8) { exit $LASTEXITCODE }; exit 0"
+            ],
+            "problemMatcher": []
+        },
+        {
+            "label": "minecraft: deploy resource pack",
+            "type": "process",
+            "command": "powershell.exe",
+            "args": [
+                "-NoProfile",
+                "-Command",
+                "& robocopy.exe '${workspaceFolder}\\xiaoboFakePlayerp' '${env:APPDATA}\\Minecraft Bedrock\\Users\\Shared\\games\\com.mojang\\development_resource_packs\\xiaoboFakePlayerp' /MIR; if ($LASTEXITCODE -ge 8) { exit $LASTEXITCODE }; exit 0"
+            ],
+            "problemMatcher": []
+        },
+        {
+            "label": "minecraft: build and deploy",
+            "dependsOrder": "sequence",
+            "dependsOn": [
+                "minecraft: build",
+                "minecraft: deploy behavior pack",
+                "minecraft: deploy resource pack"
+            ],
+            "problemMatcher": [],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            }
+        }
+    ]
+}

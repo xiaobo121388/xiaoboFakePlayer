@@ -644,3 +644,4 @@ export function commitCatalogRemoval(store, catalogRevision, catalog, id) {
     const committed = store.commitCatalog(catalogRevision, nextCatalog);
     return committed.ok ? ok(committed.value.value) : committed;
 }
+//# sourceMappingURL=lifecycleService.js.map

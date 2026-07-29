@@ -35,3 +35,4 @@ export function formatFakePlayerId(sequence) {
     }
     return `fp${String(sequence).padStart(4, "0")}`;
 }
+//# sourceMappingURL=validation.js.map

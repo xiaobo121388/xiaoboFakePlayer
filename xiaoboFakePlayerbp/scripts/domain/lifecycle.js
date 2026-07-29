@@ -49,3 +49,4 @@ export function advanceLifecycleOperation(record, expectedRevision, phase) {
         },
     });
 }
+//# sourceMappingURL=lifecycle.js.map

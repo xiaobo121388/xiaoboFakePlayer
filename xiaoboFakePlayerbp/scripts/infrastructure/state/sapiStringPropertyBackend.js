@@ -10,3 +10,4 @@ export class SapiStringPropertyBackend {
         world.setDynamicProperty(key, value);
     }
 }
+//# sourceMappingURL=sapiStringPropertyBackend.js.map

@@ -80,6 +80,13 @@ export class SapiFakePlayerRuntime {
             }
             case "break_block": {
                 const accepted = player.breakBlock(action.position, toDirection(action.face));
+                const message = `[xiaobo-fake-player] mine ${id} start accepted=${accepted}; `
+                    + `dimension=${player.dimension.id}; target=${formatPoint(action.position)}; `
+                    + `face=${action.face}; mode=${player.getGameMode()}; slot=${player.selectedSlotIndex}`;
+                if (accepted)
+                    console.info(message);
+                else
+                    console.warn(message);
                 return { accepted, inventoryChanged: accepted };
             }
             case "interact_block": {
@@ -239,6 +246,9 @@ function addExperience(player, totalExperience) {
         player.addExperience(amount);
         remaining -= amount;
     }
+}
+function formatPoint(point) {
+    return `${point.x},${point.y},${point.z}`;
 }
 function toPlayerSkinData(skin) {
     return {

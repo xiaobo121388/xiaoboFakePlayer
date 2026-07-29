@@ -477,13 +477,13 @@ test("automatic mine search consumes at most 256 unique block reads per tick and
     if (first.ok) assert.equal(first.value.blockReads, 256);
     const second = fixture.service.tick(1);
     assert.equal(second.ok, true);
-    if (second.ok) assert.equal(second.value.blockReads, 185);
-    assert.equal(fixture.queries.blockReads.length, 441);
-    assert.equal(new Set(fixture.queries.blockReads.map(({ x, y, z }) => `${x}:${y}:${z}`)).size, 441);
+    if (second.ok) assert.equal(second.value.blockReads, 256);
+    assert.equal(fixture.queries.blockReads.length, 512);
+    assert.equal(new Set(fixture.queries.blockReads.map(({ x, y, z }) => `${x}:${y}:${z}`)).size, 512);
     assert.equal(fixture.runtime.actions.length, 0);
 });
 
-test("automatic front mine searches its horizontal plane instead of blocks below", () => {
+test("automatic front mine prioritizes its horizontal plane before blocks below", () => {
     const fixture = createFixture();
     const operator = { playerId: "operator", isOperator: true };
     const config = {
@@ -497,7 +497,7 @@ test("automatic front mine searches its horizontal plane instead of blocks below
             approach: false,
         },
     };
-    fixture.queries.blockInfoByPosition.set("-1:63:0", { typeId: "minecraft:stone", solid: true });
+    fixture.queries.blockInfoByPosition.set("0:63:1", { typeId: "minecraft:stone", solid: true });
     fixture.queries.blockInfoByPosition.set("-1:64:0", { typeId: "minecraft:stone", solid: true });
     assert.equal(fixture.service.updateBehaviorConfig(
         operator,
@@ -513,6 +513,40 @@ test("automatic front mine searches its horizontal plane instead of blocks below
         kind: "break_block",
         position: { x: -1, y: 64, z: 0 },
         face: "down",
+    });
+});
+
+test("automatic front mine falls back to the ground below its forward target", () => {
+    const fixture = createFixture();
+    const operator = { playerId: "operator", isOperator: true };
+    const config = {
+        ...createDefaultBehaviorConfig(),
+        mine: {
+            enabled: true,
+            intervalTicks: 10,
+            direction: "front" as const,
+            blockTypeId: "minecraft:grass_block",
+            searchRadius: 1,
+            approach: false,
+        },
+    };
+    fixture.queries.blockInfoByPosition.set("0:63:1", { typeId: "minecraft:grass_block", solid: true });
+    assert.equal(fixture.service.updateBehaviorConfig(
+        operator,
+        fixture.record.id,
+        4,
+        fixture.record.behavior,
+        config,
+    ).ok, true);
+    fixture.runtime.actions.length = 0;
+
+    const result = fixture.service.tick(0);
+    assert.equal(result.ok, true);
+    if (result.ok) assert.equal(result.value.blockReads, 10);
+    assert.deepEqual(fixture.runtime.actions.at(-1), {
+        kind: "break_block",
+        position: { x: 0, y: 63, z: 1 },
+        face: "north",
     });
 });
 

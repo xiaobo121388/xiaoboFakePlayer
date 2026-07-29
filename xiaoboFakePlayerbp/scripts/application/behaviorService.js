@@ -361,11 +361,13 @@ export class BehaviorService {
         const signature = `${dimension}:${origin.x}:${origin.y}:${origin.z}:${config.blockTypeId}:${config.searchRadius}`;
         let scan = this.mineScans.get(record.id);
         if (scan === undefined || scan.signature !== signature) {
-            scan = { signature, origin, radius: 0, cursor: 0 };
+            scan = { signature, origin, layer: 0, radius: 0, cursor: 0 };
             this.mineScans.set(record.id, scan);
         }
         while (blockReads < blockBudget) {
-            const offset = nextShellOffset(scan, config.searchRadius);
+            const offset = config.direction === "front"
+                ? nextFrontOffset(scan, config.searchRadius)
+                : nextShellOffset(scan, config.searchRadius);
             if (offset === undefined) {
                 this.mineScans.delete(record.id);
                 return {
@@ -374,8 +376,6 @@ export class BehaviorService {
                     diagnostic: describeMine(record, "no_target", scan.origin),
                 };
             }
-            if (config.direction === "front" && offset.y !== 0)
-                continue;
             const position = addPoints(scan.origin, offset);
             const info = this.worldQueries.getBlockInfo(dimension, position);
             blockReads += 1;
@@ -490,6 +490,41 @@ function directMineTarget(position, yaw, direction) {
         y: base.y,
         z: base.z + Math.round(Math.cos(radians)),
     };
+}
+function nextFrontOffset(scan, maximumRadius) {
+    while (scan.layer <= maximumRadius * 2) {
+        const horizontal = nextHorizontalShellOffset(scan, maximumRadius);
+        if (horizontal !== undefined) {
+            return { ...horizontal, y: centeredLayerOffset(scan.layer) };
+        }
+        scan.layer += 1;
+        scan.radius = 0;
+        scan.cursor = 0;
+    }
+    return undefined;
+}
+function nextHorizontalShellOffset(scan, maximumRadius) {
+    while (scan.radius <= maximumRadius) {
+        const width = scan.radius * 2 + 1;
+        const area = width * width;
+        while (scan.cursor < area) {
+            const index = scan.cursor;
+            scan.cursor += 1;
+            const x = index % width - scan.radius;
+            const z = Math.floor(index / width) - scan.radius;
+            if (Math.max(Math.abs(x), Math.abs(z)) === scan.radius)
+                return { x, y: 0, z };
+        }
+        scan.radius += 1;
+        scan.cursor = 0;
+    }
+    return undefined;
+}
+function centeredLayerOffset(index) {
+    if (index === 0)
+        return 0;
+    const distance = Math.ceil(index / 2);
+    return index % 2 === 1 ? -distance : distance;
 }
 function nextShellOffset(scan, maximumRadius) {
     while (scan.radius <= maximumRadius) {

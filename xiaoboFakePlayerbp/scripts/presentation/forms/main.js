@@ -1,6 +1,7 @@
 import { world } from "@minecraft/server";
 import { ActionFormData, MessageFormData, ModalFormData } from "@minecraft/server-ui";
 import { isCapabilityEnabled } from "../../domain/capabilities.js";
+import { err, ok } from "../../domain/results.js";
 import { actorIdentity, isRealPlayer, playerLocation } from "../playerContext.js";
 import { openBehaviorForm } from "./behaviors.js";
 import { formBoundary, ready, sendError, t } from "./formSupport.js";
@@ -104,13 +105,13 @@ async function openDetailForm(player, services, record) {
             form.button(t("xiaobo.fp.form.detail.actions"));
             actions.push(() => openActionForm(player, services, record));
             form.button(t("xiaobo.fp.form.detail.offline"));
-            actions.push(() => runRecordMutation(player, services, () => services.lifecycle.takeOffline(actorIdentity(player), record.id, record.recordRevision)));
+            actions.push(() => runRecordMutation(player, services, record.id, (current) => services.lifecycle.takeOffline(actorIdentity(player), current.id, current.recordRevision)));
         }
         else if (record.lifecycle.kind === "offline" || record.lifecycle.kind === "missing") {
             form.button(t("xiaobo.fp.form.detail.online_saved"));
-            actions.push(() => runRecordMutation(player, services, () => services.lifecycle.bringOnline(actorIdentity(player), record.id, record.recordRevision)));
+            actions.push(() => runRecordMutation(player, services, record.id, (current) => services.lifecycle.bringOnline(actorIdentity(player), current.id, current.recordRevision)));
             form.button(t("xiaobo.fp.form.detail.online_here"));
-            actions.push(() => runRecordMutation(player, services, () => services.lifecycle.bringOnline(actorIdentity(player), record.id, record.recordRevision, playerLocation(player))));
+            actions.push(() => runRecordMutation(player, services, record.id, (current) => services.lifecycle.bringOnline(actorIdentity(player), current.id, current.recordRevision, playerLocation(player))));
         }
         if (record.lifecycle.kind === "online" || record.lifecycle.kind === "offline") {
             form.button(t("xiaobo.fp.form.detail.behavior"));
@@ -160,10 +161,13 @@ async function openActionForm(player, services, record) {
         const selected = entries[response.selection];
         if (selected === undefined)
             return;
-        const result = services.behavior.perform(actorIdentity(player), record.id, record.recordRevision, selected[1]);
+        const current = loadCurrentRecord(player, services, record.id);
+        if (!current.ok)
+            return sendError(player, current.error.message);
+        const result = services.behavior.perform(actorIdentity(player), current.value.id, current.value.recordRevision, selected[1]);
         if (!result.ok)
             return sendError(player, result.error.message);
-        player.sendMessage({ translate: "xiaobo.fp.message.action_ok", with: [record.name] });
+        player.sendMessage({ translate: "xiaobo.fp.message.action_ok", with: [current.value.name] });
     });
 }
 async function openRenameForm(player, services, record) {
@@ -177,7 +181,7 @@ async function openRenameForm(player, services, record) {
     const name = response.formValues?.[0];
     if (typeof name !== "string")
         return sendError(player, "新名称无效。");
-    await runRecordMutation(player, services, () => services.lifecycle.rename(actorIdentity(player), record.id, record.recordRevision, { requestedName: name, unavailablePlayerNames: world.getAllPlayers().map((candidate) => candidate.name) }));
+    await runRecordMutation(player, services, record.id, (current) => services.lifecycle.rename(actorIdentity(player), current.id, current.recordRevision, { requestedName: name, unavailablePlayerNames: world.getAllPlayers().map((candidate) => candidate.name) }));
 }
 async function openRespawnRuleForm(player, services, record) {
     const response = await new ModalFormData()
@@ -193,7 +197,7 @@ async function openRespawnRuleForm(player, services, record) {
     const mode = typeof index === "number" ? RESPAWN_MODES[index] : undefined;
     if (mode === undefined)
         return sendError(player, "复活规则无效。");
-    await runRecordMutation(player, services, () => services.lifecycle.setRespawnRule(actorIdentity(player), record.id, record.recordRevision, mode, mode === "manual" ? playerLocation(player) : undefined));
+    await runRecordMutation(player, services, record.id, (current) => services.lifecycle.setRespawnRule(actorIdentity(player), current.id, current.recordRevision, mode, mode === "manual" ? playerLocation(player) : undefined));
 }
 async function confirmPurge(player, services, record) {
     const response = await new MessageFormData()
@@ -204,7 +208,10 @@ async function confirmPurge(player, services, record) {
         .show(player);
     if (response.canceled || response.selection !== 1 || !ready(player, services))
         return;
-    const result = services.lifecycle.purge(actorIdentity(player), record.id, record.recordRevision);
+    const current = loadCurrentRecord(player, services, record.id);
+    if (!current.ok)
+        return sendError(player, current.error.message);
+    const result = services.lifecycle.purge(actorIdentity(player), current.value.id, current.value.recordRevision);
     if (!result.ok)
         return sendError(player, result.error.message);
     player.sendMessage({ translate: "xiaobo.fp.message.deleted", with: [result.value.name] });
@@ -219,7 +226,10 @@ async function confirmRecycleDelete(player, services, record) {
         .show(player);
     if (response.canceled || response.selection !== 1 || !ready(player, services))
         return;
-    const result = services.lifecycle.recycle(actorIdentity(player), record.id, record.recordRevision);
+    const current = loadCurrentRecord(player, services, record.id);
+    if (!current.ok)
+        return sendError(player, current.error.message);
+    const result = services.lifecycle.recycle(actorIdentity(player), current.value.id, current.value.recordRevision);
     if (!result.ok)
         return sendError(player, result.error.message);
     player.sendMessage({ translate: "xiaobo.fp.message.recycled", with: [result.value.name] });
@@ -334,14 +344,24 @@ async function showRecoveryForm(player, services) {
     if (!response.canceled && action !== undefined && player.isValid && ready(player, services))
         await action();
 }
-async function runRecordMutation(player, services, mutation) {
+async function runRecordMutation(player, services, id, mutation) {
     if (!ready(player, services))
         return;
-    const result = mutation();
+    const current = loadCurrentRecord(player, services, id);
+    if (!current.ok)
+        return sendError(player, current.error.message);
+    const result = mutation(current.value);
     if (!result.ok)
         return sendError(player, result.error.message);
     player.sendMessage({ translate: "xiaobo.fp.message.saved", with: [result.value.name] });
     await openDetailForm(player, services, result.value);
+}
+function loadCurrentRecord(player, services, id) {
+    const listed = services.lifecycle.list(actorIdentity(player));
+    if (!listed.ok)
+        return listed;
+    const record = listed.value.find((candidate) => candidate.id === id);
+    return record === undefined ? err("NOT_FOUND", `未找到假人 ${id}。`) : ok(record);
 }
 function finitePoint(point) {
     return Number.isFinite(point.x) && Number.isFinite(point.y) && Number.isFinite(point.z);

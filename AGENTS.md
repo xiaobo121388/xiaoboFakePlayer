@@ -5,12 +5,14 @@
 - Use Node.js 22 or newer and install dependencies with `npm ci`.
 - Treat `src/**/*.ts` as source. `npm run build` overwrites the checked-in runtime JavaScript under `xiaoboFakePlayerbp/scripts/`; never edit that generated directory by hand.
 - Keep NodeNext ESM imports ending in `.js`, including imports written in TypeScript and tests.
+- Follow [.github/instructions/bedrock-sapi-1-26-33.instructions.md](.github/instructions/bedrock-sapi-1-26-33.instructions.md) and keep the entire project exactly aligned with international Bedrock 1.26.33.
 
 ## Validate Changes
 
 - Run `npm run typecheck`, then `npm test`, then `npm run build` for code changes.
 - Tests use the Node.js built-in test runner. Add focused `test/*.test.ts` coverage for changed domain, application, or state behavior; there is no Jest, Vitest, lint, or format script.
-- A successful automated run does not validate Minecraft engine behavior. Changes to Script API calls, inventory fidelity, simulated-player lifecycle, Persona data, dimensions, watchdog-sensitive scheduling, manifests, or dependency versions require the Bedrock 26.34 checks in [README.md](README.md#实机发布门槛).
+- A successful automated run does not validate Minecraft engine behavior. Changes to Script API calls, inventory fidelity, simulated-player lifecycle, Persona data, dimensions, watchdog-sensitive scheduling, manifests, or dependency versions require Bedrock 1.26.33 real-game checks; update the currently stale 26.34 references in [README.md](README.md#实机发布门槛) as part of the baseline migration.
+- After successful validation, mirror both packs to the local Minecraft development directories as specified in [.github/instructions/bedrock-development-pack-sync.instructions.md](.github/instructions/bedrock-development-pack-sync.instructions.md).
 
 ## Preserve Boundaries
 

@@ -193,6 +193,28 @@ test("checkpoint commits the verified image before removing the previous snapsho
     assert.equal(fixture.snapshots.has(snapshotId(fixture.record.id, 2)), true);
 });
 
+test("checkpoint polling skips a clean fake player before its next periodic checkpoint", () => {
+    const fixture = createFixture();
+
+    const result = fixture.service.checkpointNext(20);
+
+    assert.deepEqual(result, ok(undefined));
+    assert.equal(fixture.state.catalogRevision, 0);
+    assert.deepEqual(fixture.snapshots.removals, []);
+});
+
+test("world tick reset rebases the checkpoint once without continuous revision advances", () => {
+    const fixture = createFixture();
+
+    const rebased = fixture.service.checkpointNext(5);
+    const nextPoll = fixture.service.checkpointNext(6);
+
+    assert.equal(rebased.ok, true);
+    if (rebased.ok) assert.equal(rebased.value?.record.lastCheckpointTick, 5);
+    assert.deepEqual(nextPoll, ok(undefined));
+    assert.equal(fixture.state.catalogRevision, 1);
+});
+
 test("catalog failure removes the unreferenced new image and preserves the authoritative snapshot", () => {
     const fixture = createFixture();
     fixture.state.failCatalogCommit = true;

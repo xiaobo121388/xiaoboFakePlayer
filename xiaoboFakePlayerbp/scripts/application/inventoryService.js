@@ -1,6 +1,7 @@
 import { INVENTORY_SLOT_COUNT, TOTAL_SLOT_COUNT } from "../domain/inventory.js";
 import { isAllowed } from "../domain/permissions.js";
 import { err, ok } from "../domain/results.js";
+const PERIODIC_CHECKPOINT_INTERVAL_TICKS = 1_200;
 export class InventoryService {
     stateStore;
     runtime;
@@ -68,7 +69,9 @@ export class InventoryService {
         if (!loaded.ok)
             return err("CONFLICT", loaded.diagnostics.join("; "));
         const candidates = Object.values(loaded.state.value.records)
-            .filter((record) => record.lifecycle.kind === "online" && this.runtime.get(record.id)?.alive === true)
+            .filter((record) => (record.lifecycle.kind === "online"
+            && this.runtime.get(record.id)?.alive === true
+            && (this.dirty.has(record.id) || checkpointDue(record, currentTick))))
             .sort((left, right) => this.compareCheckpointPriority(left, right));
         const lastIndex = candidates.findIndex((record) => record.id === this.lastAttemptedId);
         const rotated = lastIndex < 0
@@ -676,6 +679,11 @@ export class InventoryService {
 }
 export function snapshotId(id, revision) {
     return `xiaobo:${id}_inv_${revision}`;
+}
+function checkpointDue(record, currentTick) {
+    return record.lastCheckpointTick === null
+        || currentTick < record.lastCheckpointTick
+        || currentTick - record.lastCheckpointTick >= PERIODIC_CHECKPOINT_INTERVAL_TICKS;
 }
 function commitRecord(store, catalogRevision, catalog, record) {
     const committed = store.commitCatalog(catalogRevision, {

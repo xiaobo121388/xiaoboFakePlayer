@@ -158,6 +158,7 @@ export class BehaviorService {
         let attemptedActions = 0;
         let acceptedActions = 0;
         let blockReads = 0;
+        let mineDiagnostic;
         for (const task of rotated) {
             if (attemptedActions >= MAX_AUTOMATIC_ACTIONS_PER_TICK)
                 break;
@@ -175,6 +176,8 @@ export class BehaviorService {
             try {
                 const outcome = this.runAutomaticBehavior(task.record, task.kind, MAX_BLOCK_READS_PER_TICK - blockReads);
                 blockReads += outcome.blockReads;
+                if (outcome.mineDiagnostic !== undefined)
+                    mineDiagnostic = outcome.mineDiagnostic;
                 if (outcome.attempted) {
                     actedIds.add(task.record.id);
                     attemptedActions += 1;
@@ -189,7 +192,13 @@ export class BehaviorService {
                 lease.value.release();
             }
         }
-        return ok({ consideredTasks, attemptedActions, acceptedActions, blockReads });
+        return ok({
+            consideredTasks,
+            attemptedActions,
+            acceptedActions,
+            blockReads,
+            ...(mineDiagnostic === undefined ? {} : { mineDiagnostic }),
+        });
     }
     runAutomaticBehavior(record, kind, blockBudget) {
         switch (kind) {
@@ -259,7 +268,12 @@ export class BehaviorService {
             const info = this.worldQueries.getBlockInfo(activeTarget.dimension, activeTarget.position);
             blockReads += 1;
             if (isMineTarget(info, record.behavior.mine.blockTypeId)) {
-                return { attempted: false, accepted: false, blockReads };
+                return {
+                    attempted: false,
+                    accepted: false,
+                    blockReads,
+                    mineDiagnostic: describeMine(record, "waiting", activeTarget.position, info),
+                };
             }
         }
         if (activeTarget !== undefined) {
@@ -277,6 +291,7 @@ export class BehaviorService {
                 accepted: false,
                 blockReads,
                 continueNextTick: resolved.scanPending,
+                mineDiagnostic: resolved.diagnostic,
             };
         }
         const target = resolved.target.position;
@@ -288,17 +303,32 @@ export class BehaviorService {
             });
             if (receipt.accepted)
                 this.activeMineTargets.set(record.id, resolved.target);
-            return { attempted: true, accepted: receipt.accepted, blockReads };
+            return {
+                attempted: true,
+                accepted: receipt.accepted,
+                blockReads,
+                mineDiagnostic: describeMine(record, receipt.accepted ? "starting" : "rejected", target),
+            };
         }
         if (!record.behavior.mine.approach) {
-            return { attempted: false, accepted: false, blockReads };
+            return {
+                attempted: false,
+                accepted: false,
+                blockReads,
+                mineDiagnostic: describeMine(record, "blocked", target),
+            };
         }
         const receipt = this.executeRuntime(record.id, {
             kind: "navigate",
             position: { x: target.x + 0.5, y: target.y + 1, z: target.z + 0.5 },
             speed: 1,
         });
-        return { attempted: true, accepted: receipt.accepted, blockReads };
+        return {
+            attempted: true,
+            accepted: receipt.accepted,
+            blockReads,
+            mineDiagnostic: describeMine(record, "approaching", target),
+        };
     }
     resolveMineTarget(record, runtimePosition, dimension, blockBudget) {
         const config = record.behavior.mine;
@@ -308,19 +338,25 @@ export class BehaviorService {
             const info = this.worldQueries.getBlockInfo(dimension, cached.position);
             blockReads += 1;
             if (isMineTarget(info, config.blockTypeId)) {
-                return { target: cached, blockReads, scanPending: false };
+                if (config.approach || this.worldQueries.hasBlockLineOfSight(record.id, dimension, cached.position, MAX_INTERACTION_DISTANCE)) {
+                    return { target: cached, blockReads, scanPending: false };
+                }
             }
             this.mineTargets.delete(record.id);
         }
         const origin = directMineTarget(runtimePosition, this.runtime.get(record.id)?.rotation.y ?? 0, config.direction);
-        if (config.blockTypeId === null || config.searchRadius === 0) {
+        if (config.searchRadius === 0) {
             if (blockReads >= blockBudget)
                 return { blockReads, scanPending: true };
             const info = this.worldQueries.getBlockInfo(dimension, origin);
             blockReads += 1;
             return isMineTarget(info, config.blockTypeId)
                 ? { target: { dimension, position: origin }, blockReads, scanPending: false }
-                : { blockReads, scanPending: false };
+                : {
+                    blockReads,
+                    scanPending: false,
+                    diagnostic: describeMine(record, "no_target", origin, info),
+                };
         }
         const signature = `${dimension}:${origin.x}:${origin.y}:${origin.z}:${config.blockTypeId}:${config.searchRadius}`;
         let scan = this.mineScans.get(record.id);
@@ -332,19 +368,29 @@ export class BehaviorService {
             const offset = nextShellOffset(scan, config.searchRadius);
             if (offset === undefined) {
                 this.mineScans.delete(record.id);
-                return { blockReads, scanPending: false };
+                return {
+                    blockReads,
+                    scanPending: false,
+                    diagnostic: describeMine(record, "no_target", scan.origin),
+                };
             }
             const position = addPoints(scan.origin, offset);
             const info = this.worldQueries.getBlockInfo(dimension, position);
             blockReads += 1;
             if (!isMineTarget(info, config.blockTypeId))
                 continue;
+            if (!config.approach && !this.worldQueries.hasBlockLineOfSight(record.id, dimension, position, MAX_INTERACTION_DISTANCE))
+                continue;
             const target = { dimension, position };
             this.mineScans.delete(record.id);
             this.mineTargets.set(record.id, target);
             return { target, blockReads, scanPending: false };
         }
-        return { blockReads, scanPending: true };
+        return {
+            blockReads,
+            scanPending: true,
+            diagnostic: describeMine(record, "scanning", scan.origin),
+        };
     }
     runUse(record) {
         const receipt = this.executeRuntime(record.id, {
@@ -421,6 +467,15 @@ function behaviorConfigsEqual(left, right) {
 function isMineTarget(info, typeId) {
     return info !== undefined && info.solid && (typeId === null || info.typeId === typeId);
 }
+function describeMine(record, state, position, info) {
+    const config = record.behavior.mine;
+    return `id=${record.id}; state=${state}; direction=${config.direction}; target=${formatPoint(position)}; `
+        + `configured=${config.blockTypeId ?? "any"}; observed=${info?.typeId ?? "unknown"}; `
+        + `solid=${info?.solid ?? "unknown"}; radius=${config.searchRadius}; approach=${config.approach}`;
+}
+function formatPoint({ x, y, z }) {
+    return `${x},${y},${z}`;
+}
 function directMineTarget(position, yaw, direction) {
     const base = floorPoint(position);
     if (direction === "down")
@@ -430,7 +485,7 @@ function directMineTarget(position, yaw, direction) {
     const radians = yaw * Math.PI / 180;
     return {
         x: base.x + Math.round(-Math.sin(radians)),
-        y: base.y + 1,
+        y: base.y,
         z: base.z + Math.round(Math.cos(radians)),
     };
 }

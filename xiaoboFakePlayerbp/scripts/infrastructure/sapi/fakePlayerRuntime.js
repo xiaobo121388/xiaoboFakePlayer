@@ -87,7 +87,7 @@ export class SapiFakePlayerRuntime {
                     console.info(message);
                 else
                     console.warn(message);
-                return { accepted, inventoryChanged: accepted };
+                return { accepted };
             }
             case "interact_block": {
                 const accepted = player.interactWithBlock(action.position, toDirection(action.face));

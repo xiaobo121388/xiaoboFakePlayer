@@ -113,6 +113,8 @@ class MemoryWorldQueries implements WorldQueries {
     public readonly onlinePlayers = new Map<string, RuntimeEntityTarget>();
     public attackTargets: readonly RuntimeEntityTarget[] = [];
     public blockInfo: RuntimeBlockInfo | undefined;
+    public readonly blockInfoByPosition = new Map<string, RuntimeBlockInfo>();
+    public readonly hiddenBlocks = new Set<string>();
     public readonly blockReads: Point[] = [];
 
     public isChunkLoaded(): boolean {
@@ -123,8 +125,12 @@ class MemoryWorldQueries implements WorldQueries {
         return this.solid;
     }
 
-    public hasBlockLineOfSight(): boolean {
-        return this.visible;
+    public hasBlockLineOfSight(
+        _fakePlayerId: FakePlayerId,
+        _dimension: DimensionKey,
+        position: Point,
+    ): boolean {
+        return this.visible && !this.hiddenBlocks.has(pointKey(position));
     }
 
     public hasLineOfSight(): boolean {
@@ -145,8 +151,12 @@ class MemoryWorldQueries implements WorldQueries {
 
     public getBlockInfo(_dimension: DimensionKey, position: Point): RuntimeBlockInfo | undefined {
         this.blockReads.push({ ...position });
-        return this.blockInfo;
+        return this.blockInfoByPosition.get(pointKey(position)) ?? this.blockInfo;
     }
+}
+
+function pointKey({ x, y, z }: Point): string {
+    return `${x}:${y}:${z}`;
 }
 
 function createFixture() {
@@ -473,6 +483,72 @@ test("automatic mine search consumes at most 256 unique block reads per tick and
     assert.equal(fixture.runtime.actions.length, 0);
 });
 
+test("automatic mine searches the configured radius when the block ID is empty", () => {
+    const fixture = createFixture();
+    const operator = { playerId: "operator", isOperator: true };
+    const config = {
+        ...createDefaultBehaviorConfig(),
+        mine: {
+            enabled: true,
+            intervalTicks: 10,
+            direction: "front" as const,
+            blockTypeId: null,
+            searchRadius: 1,
+            approach: false,
+        },
+    };
+    fixture.queries.blockInfoByPosition.set("-1:63:0", { typeId: "minecraft:stone", solid: true });
+    assert.equal(fixture.service.updateBehaviorConfig(
+        operator,
+        fixture.record.id,
+        4,
+        fixture.record.behavior,
+        config,
+    ).ok, true);
+    fixture.runtime.actions.length = 0;
+
+    assert.equal(fixture.service.tick(0).ok, true);
+    assert.deepEqual(fixture.runtime.actions.at(-1), {
+        kind: "break_block",
+        position: { x: -1, y: 63, z: 0 },
+        face: "up",
+    });
+});
+
+test("automatic mine skips hidden search candidates when approach is disabled", () => {
+    const fixture = createFixture();
+    const operator = { playerId: "operator", isOperator: true };
+    const config = {
+        ...createDefaultBehaviorConfig(),
+        mine: {
+            enabled: true,
+            intervalTicks: 10,
+            direction: "front" as const,
+            blockTypeId: "minecraft:stone",
+            searchRadius: 1,
+            approach: false,
+        },
+    };
+    fixture.queries.blockInfoByPosition.set("-1:63:0", { typeId: "minecraft:stone", solid: true });
+    fixture.queries.blockInfoByPosition.set("0:63:0", { typeId: "minecraft:stone", solid: true });
+    fixture.queries.hiddenBlocks.add("-1:63:0");
+    assert.equal(fixture.service.updateBehaviorConfig(
+        operator,
+        fixture.record.id,
+        4,
+        fixture.record.behavior,
+        config,
+    ).ok, true);
+    fixture.runtime.actions.length = 0;
+
+    assert.equal(fixture.service.tick(0).ok, true);
+    assert.deepEqual(fixture.runtime.actions.at(-1), {
+        kind: "break_block",
+        position: { x: 0, y: 63, z: 0 },
+        face: "up",
+    });
+});
+
 test("automatic mining starts once and waits for the block to finish breaking", () => {
     const fixture = createFixture();
     const operator = { playerId: "operator", isOperator: true };
@@ -497,14 +573,23 @@ test("automatic mining starts once and waits for the block to finish breaking", 
     ).ok, true);
     fixture.runtime.actions.length = 0;
 
-    assert.equal(fixture.service.tick(0).ok, true);
-    assert.equal(fixture.service.tick(1).ok, true);
+    const started = fixture.service.tick(0);
+    assert.equal(started.ok, true);
+    if (started.ok) assert.match(started.value.mineDiagnostic ?? "", /state=starting;.*target=0,64,1/);
+    assert.deepEqual(fixture.runtime.actions.at(-1), {
+        kind: "break_block",
+        position: { x: 0, y: 64, z: 1 },
+        face: "north",
+    });
+    const waiting = fixture.service.tick(1);
+    assert.equal(waiting.ok, true);
+    if (waiting.ok) assert.match(waiting.value.mineDiagnostic ?? "", /state=waiting;.*observed=minecraft:stone/);
     assert.equal(fixture.runtime.actions.filter(({ kind }) => kind === "break_block").length, 1);
 
     fixture.service.notifyBlockBroken(
         fixture.record.id,
         "minecraft:overworld",
-        { x: 0, y: 65, z: 1 },
+        { x: 0, y: 64, z: 1 },
     );
     assert.equal(fixture.service.tick(2).ok, true);
     assert.equal(fixture.runtime.actions.filter(({ kind }) => kind === "break_block").length, 2);
@@ -575,7 +660,7 @@ test("automatic mining blocks automatic item use until the active block is broke
     fixture.service.notifyBlockBroken(
         fixture.record.id,
         "minecraft:overworld",
-        { x: 0, y: 65, z: 1 },
+        { x: 0, y: 64, z: 1 },
     );
     assert.equal(fixture.service.tick(2).ok, true);
     assert.equal(fixture.runtime.actions.at(-1)?.kind, "use_item");

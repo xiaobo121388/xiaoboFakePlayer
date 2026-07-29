@@ -101,7 +101,7 @@ export class SapiFakePlayerRuntime implements FakePlayerRuntime {
                     + `face=${action.face}; mode=${player.getGameMode()}; slot=${player.selectedSlotIndex}`;
                 if (accepted) console.info(message);
                 else console.warn(message);
-                return { accepted, inventoryChanged: accepted };
+                return { accepted };
             }
             case "interact_block": {
                 const accepted = player.interactWithBlock(action.position, toDirection(action.face));

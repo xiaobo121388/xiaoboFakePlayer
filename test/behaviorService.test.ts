@@ -325,14 +325,58 @@ test("behavior configuration commits with optimistic record revision", () => {
         use: { enabled: true, intervalTicks: 5, slot: 2 },
     };
 
-    const updated = fixture.service.updateBehaviorConfig(operator, fixture.record.id, 4, config);
+    const updated = fixture.service.updateBehaviorConfig(
+        operator,
+        fixture.record.id,
+        4,
+        fixture.record.behavior,
+        config,
+    );
     assert.equal(updated.ok, true);
     if (updated.ok) {
         assert.equal(updated.value.recordRevision, 5);
         assert.deepEqual(updated.value.behavior, config);
     }
     assert.equal(fixture.runtime.actions.at(-1)?.kind, "stop");
-    assert.equal(fixture.service.updateBehaviorConfig(operator, fixture.record.id, 4, config).ok, false);
+    assert.equal(fixture.service.updateBehaviorConfig(
+        operator,
+        fixture.record.id,
+        4,
+        fixture.record.behavior,
+        config,
+    ).ok, false);
+});
+
+test("behavior configuration tolerates checkpoint-only revision advances", () => {
+    const fixture = createFixture();
+    const operator = { playerId: "operator", isOperator: true };
+    const config = {
+        ...createDefaultBehaviorConfig(),
+        follow: {
+            enabled: true,
+            targetPlayerId: "playfab-target",
+            lastKnownName: "Steve",
+            intervalTicks: 10,
+            speed: 0.8,
+            stopDistance: 2,
+        },
+    };
+
+    const checkpoint = fixture.inventory.checkpoint(fixture.record.id, 4, 20);
+    assert.equal(checkpoint.ok, true);
+    const updated = fixture.service.updateBehaviorConfig(
+        operator,
+        fixture.record.id,
+        4,
+        fixture.record.behavior,
+        config,
+    );
+
+    assert.equal(updated.ok, true);
+    if (updated.ok) {
+        assert.equal(updated.value.recordRevision, 6);
+        assert.deepEqual(updated.value.behavior, config);
+    }
 });
 
 test("automatic follow and attack share a fair per-player action slot and honor cooldowns", () => {
@@ -357,7 +401,13 @@ test("automatic follow and attack share a fair per-player action slot and honor 
             chase: false,
         },
     };
-    assert.equal(fixture.service.updateBehaviorConfig(operator, fixture.record.id, 4, config).ok, true);
+    assert.equal(fixture.service.updateBehaviorConfig(
+        operator,
+        fixture.record.id,
+        4,
+        fixture.record.behavior,
+        config,
+    ).ok, true);
     fixture.runtime.actions.length = 0;
     fixture.queries.onlinePlayers.set("playfab-target", {
         id: "player-runtime",
@@ -403,7 +453,13 @@ test("automatic mine search consumes at most 256 unique block reads per tick and
         },
     };
     fixture.queries.blockInfo = { typeId: "minecraft:stone", solid: true };
-    assert.equal(fixture.service.updateBehaviorConfig(operator, fixture.record.id, 4, config).ok, true);
+    assert.equal(fixture.service.updateBehaviorConfig(
+        operator,
+        fixture.record.id,
+        4,
+        fixture.record.behavior,
+        config,
+    ).ok, true);
     fixture.runtime.actions.length = 0;
 
     const first = fixture.service.tick(0);

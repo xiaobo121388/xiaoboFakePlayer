@@ -178,7 +178,12 @@ async function openActionForm(player: Player, services: CommandServices, record:
                 dimension: player.dimension.id,
                 position: player.location,
             }],
-            [t("xiaobo.fp.form.action.lookat"), { kind: "look_at_entity", targetId: player.id }],
+            [t("xiaobo.fp.form.action.lookat"), {
+                kind: "look_at_once",
+                dimension: player.dimension.id,
+                position: player.location,
+            }],
+            [t("xiaobo.fp.form.action.lookat_continuous"), { kind: "look_at_entity", targetId: player.id }],
             [t("xiaobo.fp.form.action.jump"), { kind: "jump" }],
             [t("xiaobo.fp.form.action.stop"), { kind: "stop" }],
         ];
@@ -195,11 +200,14 @@ async function openActionForm(player: Player, services: CommandServices, record:
         if (selected === undefined) return;
         const current = loadCurrentRecord(player, services, record.id);
         if (!current.ok) return sendError(player, current.error.message);
+        const action = selected[1].kind === "look_at_once"
+            ? { kind: "look_at_once" as const, dimension: player.dimension.id, position: player.location }
+            : selected[1];
         const result = services.behavior.perform(
             actorIdentity(player),
             current.value.id,
             current.value.recordRevision,
-            selected[1],
+            action,
         );
         if (!result.ok) return sendError(player, result.error.message);
         player.sendMessage({ translate: "xiaobo.fp.message.action_ok", with: [current.value.name] });

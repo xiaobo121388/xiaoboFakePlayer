@@ -299,6 +299,25 @@ test("coordinate actions reject cross-dimension and unloaded targets before runt
     assert.equal(fixture.runtime.actions.length, 0);
 });
 
+test("one-shot look uses the AFK direction algorithm while continuous look keeps tracking the entity", () => {
+    const fixture = createFixture();
+    const operator = { playerId: "operator", isOperator: true };
+
+    assert.equal(fixture.service.perform(operator, fixture.record.id, 4, {
+        kind: "look_at_once",
+        dimension: "minecraft:overworld",
+        position: { x: 3, y: 68, z: 4 },
+    }).ok, true);
+    assert.equal(fixture.service.perform(operator, fixture.record.id, 4, {
+        kind: "look_at_entity",
+        targetId: "operator",
+    }).ok, true);
+    assert.deepEqual(fixture.runtime.actions, [
+        { kind: "look_at_once", position: { x: 468, y: 688, z: 624 } },
+        { kind: "look_at_entity", targetId: "operator" },
+    ]);
+});
+
 test("navigation validates speed and reports whether a full path exists", () => {
     const fixture = createFixture();
     const operator = { playerId: "operator", isOperator: true };

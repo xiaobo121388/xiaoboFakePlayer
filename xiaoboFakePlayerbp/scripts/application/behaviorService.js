@@ -12,6 +12,7 @@ const FRONT_MINE_RAY_DISTANCE = 7;
 const FRONT_PLACE_RAY_DISTANCE = 7;
 // 非射线目标没有原生命中面，以眼睛位置推导破坏面。
 const MINE_EYE_HEIGHT = 1.62;
+const ONE_SHOT_LOOK_DISTANCE = 1_000;
 const AUTOMATIC_BEHAVIORS = ["follow", "attack", "mine", "place", "use"];
 const CHEST_BLOCK_TYPE_IDS = new Set([
     "minecraft:chest",
@@ -71,7 +72,7 @@ export class BehaviorService {
         if (runtime === undefined || !runtime.alive) {
             return err("INVALID_STATE", `假人 ${id} 没有存活的在线实例。`);
         }
-        const mapped = mapAction(id, action, runtime.dimension, this.worldQueries);
+        const mapped = mapAction(id, action, runtime, this.worldQueries);
         if (!mapped.ok)
             return mapped;
         const lease = this.coordinator.tryAcquire([`fake:${id}`]);
@@ -761,7 +762,7 @@ function distanceSquared(left, right) {
     const z = left.z - right.z;
     return x * x + y * y + z * z;
 }
-function mapAction(fakePlayerId, action, runtimeDimension, worldQueries) {
+function mapAction(fakePlayerId, action, runtime, worldQueries) {
     switch (action.kind) {
         case "jump":
         case "stop":
@@ -777,29 +778,36 @@ function mapAction(fakePlayerId, action, runtimeDimension, worldQueries) {
                 ? ok(action)
                 : err("INVALID_STATE", "旋转角度必须是有限数字。");
         case "look_at":
+        case "look_at_once": {
             if (!isFinitePoint(action.position))
                 return err("INVALID_STATE", "目标坐标必须是有限数字。");
-            if (action.dimension !== runtimeDimension) {
+            if (action.dimension !== runtime.dimension) {
                 return err("INVALID_STATE", "假人只能看向同维度坐标。");
             }
             if (!worldQueries.isChunkLoaded(action.dimension, action.position)) {
                 return err("INVALID_STATE", "目标坐标所在区块未加载。");
             }
-            return ok({ kind: "look_at", position: action.position });
+            if (action.kind === "look_at")
+                return ok({ kind: "look_at", position: action.position });
+            const position = oneShotLookTarget(runtime.position, action.position);
+            return position === undefined
+                ? err("INVALID_STATE", "目标位置与假人位置重合，无需转向。")
+                : ok({ kind: "look_at_once", position });
+        }
         case "look_at_entity":
             {
                 const target = validateEntityTarget(fakePlayerId, action.targetId, worldQueries);
                 return target.ok ? ok(action) : target;
             }
         case "move_to": {
-            const destination = validateCoordinateTarget(action.dimension, action.position, runtimeDimension, worldQueries);
+            const destination = validateCoordinateTarget(action.dimension, action.position, runtime.dimension, worldQueries);
             if (!destination.ok)
                 return destination;
             const speed = normalizeSpeed(action.speed);
             return speed.ok ? ok({ kind: "move_to", position: action.position, speed: speed.value }) : speed;
         }
         case "navigate": {
-            const destination = validateCoordinateTarget(action.dimension, action.position, runtimeDimension, worldQueries);
+            const destination = validateCoordinateTarget(action.dimension, action.position, runtime.dimension, worldQueries);
             if (!destination.ok)
                 return destination;
             const speed = normalizeSpeed(action.speed);
@@ -829,7 +837,7 @@ function mapAction(fakePlayerId, action, runtimeDimension, worldQueries) {
         }
         case "break_block":
         case "interact_block": {
-            const target = validateBlockTarget(fakePlayerId, action, runtimeDimension, worldQueries);
+            const target = validateBlockTarget(fakePlayerId, action, runtime.dimension, worldQueries);
             return target.ok
                 ? ok({ kind: action.kind, position: target.value, face: action.face })
                 : target;
@@ -838,7 +846,7 @@ function mapAction(fakePlayerId, action, runtimeDimension, worldQueries) {
             if (!validInventorySlot(action.slot)) {
                 return err("INVALID_SLOT", `物品槽位必须是 0 到 ${INVENTORY_SLOT_COUNT - 1} 的整数。`);
             }
-            const target = validateBlockTarget(fakePlayerId, action, runtimeDimension, worldQueries);
+            const target = validateBlockTarget(fakePlayerId, action, runtime.dimension, worldQueries);
             return target.ok
                 ? ok({
                     kind: action.kind,
@@ -850,6 +858,20 @@ function mapAction(fakePlayerId, action, runtimeDimension, worldQueries) {
                 : target;
         }
     }
+}
+function oneShotLookTarget(origin, target) {
+    const x = target.x - origin.x;
+    const y = target.y - origin.y;
+    const z = target.z - origin.z;
+    const distance = Math.sqrt(x * x + y * y + z * z);
+    if (distance < 0.001)
+        return undefined;
+    // 延伸方向后再取整，避免近距离坐标取整放大朝向误差。
+    return {
+        x: Math.trunc(origin.x + x / distance * ONE_SHOT_LOOK_DISTANCE),
+        y: Math.trunc(origin.y + y / distance * ONE_SHOT_LOOK_DISTANCE),
+        z: Math.trunc(origin.z + z / distance * ONE_SHOT_LOOK_DISTANCE),
+    };
 }
 function validateCoordinateTarget(dimension, position, runtimeDimension, worldQueries) {
     if (!isFinitePoint(position))

@@ -50,6 +50,7 @@ class MemoryBackend implements StringPropertyBackend {
 class MemoryRuntime implements FakePlayerRuntime {
     public readonly players = new Map<FakePlayerId, RuntimeFakePlayer>();
     public failSpawn = false;
+    public failDisconnect = false;
     public spawnCount = 0;
     public capturedSkin: FakePlayerSkin | undefined;
     public readonly spawnRequests: SpawnFakePlayerRequest[] = [];
@@ -80,6 +81,7 @@ class MemoryRuntime implements FakePlayerRuntime {
     }
 
     public disconnect(id: FakePlayerId): boolean {
+        if (this.failDisconnect) return false;
         return this.players.delete(id);
     }
 
@@ -343,6 +345,54 @@ test("snapshot failure leaves an online entity with snapshotting recovery intent
         assert.equal(record?.expectedOnline, false);
     }
     assert.equal(fixture.runtime.players.has(created.value.id), true);
+});
+
+test("disconnect failure keeps snapshotting intent instead of publishing offline state", () => {
+    const fixture = createFixture();
+    const created = fixture.service.create(operator, createRequest);
+    assert.equal(created.ok, true);
+    if (!created.ok) return;
+    fixture.runtime.failDisconnect = true;
+
+    const result = fixture.service.takeOffline(operator, created.value.id, created.value.recordRevision);
+
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.error.code, "CONFLICT");
+    assert.equal(fixture.runtime.players.has(created.value.id), true);
+    const loaded = fixture.state.loadCatalog();
+    assert.equal(loaded.ok, true);
+    if (!loaded.ok) return;
+    const record = loaded.state.value.records[created.value.id];
+    assert.equal(record?.lifecycle.kind, "snapshotting");
+    assert.equal(
+        record !== undefined && "operation" in record.lifecycle
+            ? record.lifecycle.operation?.phase
+            : undefined,
+        "snapshot_verified:1",
+    );
+
+    const recovery = new RecoveryRunner(
+        fixture.state,
+        fixture.runtime,
+        fixture.snapshots,
+        fixture.coordinator,
+        fixture.inventory,
+    );
+    const failedRecovery = recovery.run();
+    assert.equal(failedRecovery.ok, false);
+    if (!failedRecovery.ok) assert.equal(failedRecovery.error.code, "CONFLICT");
+    const stillPending = fixture.state.loadCatalog();
+    assert.equal(stillPending.ok, true);
+    if (stillPending.ok) {
+        assert.equal(stillPending.state.value.records[created.value.id]?.lifecycle.kind, "snapshotting");
+    }
+
+    fixture.runtime.failDisconnect = false;
+    assert.equal(recovery.run().ok, true);
+    const recovered = fixture.state.loadCatalog();
+    assert.equal(recovered.ok, true);
+    if (recovered.ok) assert.equal(recovered.state.value.records[created.value.id]?.lifecycle.kind, "offline");
+    assert.equal(fixture.runtime.players.has(created.value.id), false);
 });
 
 test("bring online removes the spawned fake player when no inventory snapshot can be restored", () => {

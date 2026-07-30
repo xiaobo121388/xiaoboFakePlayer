@@ -61,7 +61,7 @@ application 端口只接收稳定 ID、自有坐标、结构 ID、逻辑槽位�
 关键顺序：
 
 - 创建：提交 provisioning，生成并初始化模拟玩家，提交 online。
-- 下线：提交 snapshotting，保存并验证新快照，提交 offline 与新 inventory revision，最后断开实体。
+- 下线：提交 snapshotting，保存并验证新快照，确认实体已断开后再提交 offline 与新 inventory revision；断开失败时保留 snapshotting 供恢复重试。
 - 上线：提交 restoring，生成空实例，恢复已验证快照，提交 online。
 - 重命名：在线时先检查点并下线，预留新名称，重新生成并恢复，最后提交稳定状态。
 - 默认删除：只允许 offline；先完成全部物品和经验事务，再进入 deleting、删除快照、删除 record。

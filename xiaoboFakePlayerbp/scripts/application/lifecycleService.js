@@ -127,6 +127,9 @@ export class LifecycleService {
             const verifiedCommit = commitCatalogRecord(this.stateStore, prepared.value.catalogRevision, prepared.value.catalog, verified.value);
             if (!verifiedCommit.ok)
                 return verifiedCommit;
+            if (!this.runtime.disconnect(id)) {
+                return err("CONFLICT", `无法断开待下线假人 ${id}。`);
+            }
             const offline = transitionLifecycle(verified.value, verified.value.recordRevision, { kind: "offline" });
             if (!offline.ok)
                 return offline;
@@ -145,7 +148,6 @@ export class LifecycleService {
                 if (!removed.ok)
                     return removed;
             }
-            this.runtime.disconnect(id);
             return ok(committed.value.record);
         }
         finally {

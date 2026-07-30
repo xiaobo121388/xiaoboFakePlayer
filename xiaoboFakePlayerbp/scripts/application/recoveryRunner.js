@@ -231,6 +231,9 @@ export class RecoveryRunner {
             snapshotRevision = priorRevision;
             usedPriorSnapshot = true;
         }
+        if (this.runtime.get(record.id) !== undefined && !this.runtime.disconnect(record.id)) {
+            return err("CONFLICT", `恢复快照后无法断开假人 ${record.id}。`);
+        }
         const offline = transitionLifecycle(pending, pending.recordRevision, { kind: "offline" });
         if (!offline.ok)
             return offline;
@@ -256,9 +259,6 @@ export class RecoveryRunner {
             const removed = this.snapshots.remove(snapshotId(record.id, pending.inventoryFallbackRevision));
             if (!removed.ok)
                 return removed;
-        }
-        if (this.runtime.get(record.id) !== undefined && !this.runtime.disconnect(record.id)) {
-            return err("CONFLICT", `恢复快照后无法断开假人 ${record.id}。`);
         }
         return ok(usedPriorSnapshot
             ? `已从旧库存快照 ${snapshotRevision} 完成下线恢复`

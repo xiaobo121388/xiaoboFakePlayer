@@ -88,6 +88,7 @@ world.afterEvents.worldLoad.subscribe(() => {
 });
 
 world.afterEvents.entityDie.subscribe(({ deadEntity }) => {
+	if (!deadEntity.isValid) return;
 	const tag = deadEntity.getTags().find((candidate) => /^xiaobo_fp_fp\d{4,}$/.test(candidate));
 	if (tag === undefined) return;
 	const id = tag.slice("xiaobo_fp_".length);

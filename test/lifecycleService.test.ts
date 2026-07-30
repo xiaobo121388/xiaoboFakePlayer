@@ -68,6 +68,7 @@ class MemoryRuntime implements FakePlayerRuntime {
             position: request.position,
             rotation: request.rotation,
             gameMode: request.gameMode,
+            isSneaking: false,
             selectedSlot: request.selectedSlot,
             totalExperience: request.totalExperience,
             alive: true,

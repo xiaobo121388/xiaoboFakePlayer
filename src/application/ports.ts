@@ -53,6 +53,7 @@ export interface RuntimeFakePlayer {
     readonly position: Point;
     readonly rotation: Rotation;
     readonly gameMode: FakePlayerGameMode;
+    readonly isSneaking: boolean;
     readonly selectedSlot: number;
     readonly totalExperience: number;
     readonly alive: boolean;

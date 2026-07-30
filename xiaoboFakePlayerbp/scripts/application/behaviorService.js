@@ -494,8 +494,9 @@ export class BehaviorService {
             const support = this.worldQueries.getBlockInfo(runtime.dimension, hit.position);
             const target = addPoints(hit.position, faceOffset(hit.face));
             const targetInfo = this.worldQueries.getBlockInfo(runtime.dimension, target);
-            const directPlacement = support !== undefined && CHEST_BLOCK_TYPE_IDS.has(support.typeId);
-            if (support === undefined || (!directPlacement && support.solid !== true)) {
+            const chestSupport = support !== undefined && CHEST_BLOCK_TYPE_IDS.has(support.typeId);
+            const directPlacement = chestSupport && runtime.isSneaking;
+            if (support === undefined || (!chestSupport && support.solid !== true)) {
                 return {
                     attempted: false,
                     accepted: false,

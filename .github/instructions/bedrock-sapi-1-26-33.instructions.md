@@ -5,6 +5,12 @@ applyTo: "src/**/*.ts, test/**/*.ts, xiaoboFakePlayerbp/manifest.json, xiaoboFak
 ---
 # Bedrock SAPI Compatibility
 
+## Migration References
+
+- This project migrates the NetEase AFK fake-player add-on at `D:\MCStudioDownload\work\467359395@qq.com\Cpp\AddOn\9a9a056df0a34d3bbdc0424e7f23818a`. Use that project as the reference for gameplay scope, user-facing behavior, state transitions, and algorithmic logic only; do not copy NetEase-specific APIs or engine assumptions into this international Bedrock implementation.
+- Use the international Bedrock project at `D:\Documents\mc模组\云梦假人\FlashFakePlayerPack` as the primary local reference for concrete implementation patterns and public Script API usage. Treat it as an implementation example, not compatibility proof, and adapt it to this repository's architecture and exact 1.26.33 baseline.
+- Query `mcdk-assistant` whenever a Script API type, member, event, signature, execution boundary, or runtime availability is uncertain. Verify the answer against 1.26.33 documentation or type definitions before adding active code; do not guess or silently substitute another API.
+
 - Target the international Bedrock public Script API only. Do not use NetEase APIs, private NBT, reflection, hidden GameTest behavior, or commands and fixed delays as substitutes for missing public APIs.
 - Treat international Bedrock 1.26.33 as the exact project baseline, not merely a minimum runtime target. Do not leave active code, metadata, capability declarations, documentation, or acceptance criteria on 1.26.34 or another game build.
 - Keep both pack manifests at `min_engine_version: [1, 26, 33]`. Keep their `@minecraft/*` module dependency versions aligned with the public API versions supported by that game build.

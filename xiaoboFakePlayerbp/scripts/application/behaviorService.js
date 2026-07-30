@@ -494,7 +494,8 @@ export class BehaviorService {
             const support = this.worldQueries.getBlockInfo(runtime.dimension, hit.position);
             const target = addPoints(hit.position, faceOffset(hit.face));
             const targetInfo = this.worldQueries.getBlockInfo(runtime.dimension, target);
-            if (support?.solid !== true) {
+            const directPlacement = support !== undefined && CHEST_BLOCK_TYPE_IDS.has(support.typeId);
+            if (support === undefined || (!directPlacement && support.solid !== true)) {
                 return {
                     attempted: false,
                     accepted: false,
@@ -510,13 +511,15 @@ export class BehaviorService {
                     placeDiagnostic: describePlace(record, "target_not_air", target, targetInfo, hit.position, hit.face, hit.distance),
                 };
             }
-            const receipt = this.executeRuntime(record.id, {
-                kind: "use_item_on_block",
-                slot: config.slot,
-                position: hit.position,
-                face: hit.face,
-                faceLocation: hit.faceLocation,
-            });
+            const receipt = this.executeRuntime(record.id, directPlacement
+                ? { kind: "place_block_direct", slot: config.slot, position: target }
+                : {
+                    kind: "use_item_on_block",
+                    slot: config.slot,
+                    position: hit.position,
+                    face: hit.face,
+                    faceLocation: hit.faceLocation,
+                });
             return {
                 attempted: true,
                 accepted: receipt.accepted,

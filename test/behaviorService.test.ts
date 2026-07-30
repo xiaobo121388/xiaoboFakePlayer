@@ -663,6 +663,50 @@ test("automatic front placement uses the exact face hit by the eye ray", () => {
     assert.deepEqual(fixture.queries.viewBlockMaxDistances, [7]);
 });
 
+test("automatic front placement directly places when a chest hit is not reported solid", () => {
+    const fixture = createFixture();
+    const operator = { playerId: "operator", isOperator: true };
+    const config = {
+        ...createDefaultBehaviorConfig(),
+        place: {
+            enabled: true,
+            intervalTicks: 10,
+            mode: "front" as const,
+            position: null,
+            slot: 4,
+        },
+    };
+    fixture.queries.viewBlockHit = {
+        position: { x: 2, y: 65, z: 2 },
+        face: "west",
+        faceLocation: { x: 0, y: 0.25, z: 0.75 },
+        distance: 3,
+    };
+    fixture.queries.blockInfoByPosition.set("2:65:2", { typeId: "minecraft:chest", solid: false });
+    fixture.queries.blockInfoByPosition.set("1:65:2", { typeId: "minecraft:air", solid: false });
+    assert.equal(fixture.service.updateBehaviorConfig(
+        operator,
+        fixture.record.id,
+        4,
+        fixture.record.behavior,
+        config,
+    ).ok, true);
+    fixture.runtime.actions.length = 0;
+
+    const result = fixture.service.tick(0);
+    assert.equal(result.ok, true);
+    if (result.ok) {
+        assert.equal(result.value.blockReads, 2);
+        assert.match(result.value.placeDiagnostic ?? "", /state=accepted/);
+    }
+    assert.deepEqual(fixture.runtime.actions, [{
+        kind: "place_block_direct",
+        slot: 4,
+        position: { x: 1, y: 65, z: 2 },
+    }]);
+    assert.deepEqual(fixture.queries.viewBlockMaxDistances, [7]);
+});
+
 test("automatic coordinate placement resolves the target cell to an adjacent support face", () => {
     const fixture = createFixture();
     const operator = { playerId: "operator", isOperator: true };

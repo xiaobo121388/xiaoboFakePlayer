@@ -181,6 +181,7 @@ export class BehaviorService {
         let acceptedActions = 0;
         let blockReads = 0;
         let mineDiagnostic;
+        let placeDiagnostic;
         for (const task of rotated) {
             if (attemptedActions >= MAX_AUTOMATIC_ACTIONS_PER_TICK)
                 break;
@@ -201,6 +202,8 @@ export class BehaviorService {
                 blockReads += outcome.blockReads;
                 if (outcome.mineDiagnostic !== undefined)
                     mineDiagnostic = outcome.mineDiagnostic;
+                if (outcome.placeDiagnostic !== undefined)
+                    placeDiagnostic = outcome.placeDiagnostic;
                 if (outcome.attempted) {
                     actedIds.add(task.record.id);
                     attemptedActions += 1;
@@ -221,6 +224,7 @@ export class BehaviorService {
             acceptedActions,
             blockReads,
             ...(mineDiagnostic === undefined ? {} : { mineDiagnostic }),
+            ...(placeDiagnostic === undefined ? {} : { placeDiagnostic }),
         });
     }
     runAutomaticBehavior(record, kind, blockBudget) {
@@ -453,39 +457,86 @@ export class BehaviorService {
     }
     runPlace(record, blockBudget) {
         const runtime = this.runtime.get(record.id);
-        if (runtime === undefined || blockBudget <= 0)
-            return emptyOutcome(true);
+        if (runtime === undefined) {
+            return { ...emptyOutcome(), placeDiagnostic: describePlace(record, "runtime_missing") };
+        }
+        if (blockBudget <= 0) {
+            return { ...emptyOutcome(true), placeDiagnostic: describePlace(record, "block_budget_exhausted") };
+        }
         const config = record.behavior.place;
         if (config.mode === "front") {
             const hit = this.worldQueries.getBlockFromViewDirection(record.id, FRONT_PLACE_RAY_DISTANCE);
-            if (hit === undefined || hit.distance > MAX_INTERACTION_DISTANCE)
-                return emptyOutcome();
-            if (blockBudget < 2)
-                return emptyOutcome(true);
+            if (hit === undefined) {
+                return { ...emptyOutcome(), placeDiagnostic: describePlace(record, "no_view_hit") };
+            }
+            if (hit.distance > MAX_INTERACTION_DISTANCE) {
+                return {
+                    ...emptyOutcome(),
+                    placeDiagnostic: describePlace(record, "out_of_range", undefined, undefined, hit.position, hit.face, hit.distance),
+                };
+            }
+            if (blockBudget < 2) {
+                return {
+                    ...emptyOutcome(true),
+                    placeDiagnostic: describePlace(record, "block_budget_exhausted"),
+                };
+            }
             const support = this.worldQueries.getBlockInfo(runtime.dimension, hit.position);
             const target = addPoints(hit.position, faceOffset(hit.face));
             const targetInfo = this.worldQueries.getBlockInfo(runtime.dimension, target);
-            if (support?.solid !== true || !isAirBlock(targetInfo)) {
-                return { attempted: false, accepted: false, blockReads: 2 };
+            if (support?.solid !== true) {
+                return {
+                    attempted: false,
+                    accepted: false,
+                    blockReads: 2,
+                    placeDiagnostic: describePlace(record, "support_not_solid", target, targetInfo, hit.position, hit.face, hit.distance),
+                };
+            }
+            if (!isAirBlock(targetInfo)) {
+                return {
+                    attempted: false,
+                    accepted: false,
+                    blockReads: 2,
+                    placeDiagnostic: describePlace(record, "target_not_air", target, targetInfo, hit.position, hit.face, hit.distance),
+                };
             }
             const receipt = this.executeRuntime(record.id, {
                 kind: "use_item_on_block",
                 slot: config.slot,
                 position: hit.position,
                 face: hit.face,
+                faceLocation: hit.faceLocation,
             });
-            return { attempted: true, accepted: receipt.accepted, blockReads: 2 };
+            return {
+                attempted: true,
+                accepted: receipt.accepted,
+                blockReads: 2,
+                placeDiagnostic: describePlace(record, receipt.accepted ? "accepted" : "runtime_rejected", target, targetInfo, hit.position, hit.face, hit.distance),
+            };
         }
         const target = config.position;
-        if (target === null)
-            return emptyOutcome();
+        if (target === null) {
+            return { ...emptyOutcome(), placeDiagnostic: describePlace(record, "target_missing") };
+        }
         const targetInfo = this.worldQueries.getBlockInfo(runtime.dimension, target);
         let blockReads = 1;
-        if (!isAirBlock(targetInfo))
-            return { attempted: false, accepted: false, blockReads };
+        if (!isAirBlock(targetInfo)) {
+            return {
+                attempted: false,
+                accepted: false,
+                blockReads,
+                placeDiagnostic: describePlace(record, "target_not_air", target, targetInfo),
+            };
+        }
         for (const candidate of PLACEMENT_SUPPORTS) {
             if (blockReads >= blockBudget) {
-                return { attempted: false, accepted: false, blockReads, continueNextTick: true };
+                return {
+                    attempted: false,
+                    accepted: false,
+                    blockReads,
+                    continueNextTick: true,
+                    placeDiagnostic: describePlace(record, "block_budget_exhausted", target, targetInfo),
+                };
             }
             const supportPosition = addPoints(target, candidate.offset);
             const support = this.worldQueries.getBlockInfo(runtime.dimension, supportPosition);
@@ -497,10 +548,21 @@ export class BehaviorService {
                 slot: config.slot,
                 position: supportPosition,
                 face: candidate.face,
+                faceLocation: faceCenter(candidate.face),
             });
-            return { attempted: true, accepted: receipt.accepted, blockReads };
+            return {
+                attempted: true,
+                accepted: receipt.accepted,
+                blockReads,
+                placeDiagnostic: describePlace(record, receipt.accepted ? "accepted" : "runtime_rejected", target, targetInfo, supportPosition, candidate.face),
+            };
         }
-        return { attempted: false, accepted: false, blockReads };
+        return {
+            attempted: false,
+            accepted: false,
+            blockReads,
+            placeDiagnostic: describePlace(record, "no_visible_support", target, targetInfo),
+        };
     }
     stopFollowing(id) {
         if (!this.following.delete(id))
@@ -585,11 +647,29 @@ function faceOffset(face) {
         case "west": return { x: -1, y: 0, z: 0 };
     }
 }
+function faceCenter(face) {
+    switch (face) {
+        case "down": return { x: 0.5, y: 0, z: 0.5 };
+        case "east": return { x: 1, y: 0.5, z: 0.5 };
+        case "north": return { x: 0.5, y: 0.5, z: 0 };
+        case "south": return { x: 0.5, y: 0.5, z: 1 };
+        case "up": return { x: 0.5, y: 1, z: 0.5 };
+        case "west": return { x: 0, y: 0.5, z: 0.5 };
+    }
+}
 function describeMine(record, state, position, info) {
     const config = record.behavior.mine;
     return `id=${record.id}; state=${state}; direction=${config.direction}; target=${formatPoint(position)}; `
         + `configured=${config.blockTypeId ?? "any"}; observed=${info?.typeId ?? "unknown"}; `
         + `solid=${info?.solid ?? "unknown"}; radius=${config.searchRadius}; approach=${config.approach}`;
+}
+function describePlace(record, state, target, targetInfo, support, face, distance) {
+    const config = record.behavior.place;
+    return `id=${record.id}; state=${state}; mode=${config.mode}; slot=${config.slot}; `
+        + `target=${target === undefined ? "unknown" : formatPoint(target)}; `
+        + `targetType=${targetInfo?.typeId ?? "unknown"}; `
+        + `support=${support === undefined ? "unknown" : formatPoint(support)}; `
+        + `face=${face ?? "unknown"}; distance=${distance ?? "unknown"}`;
 }
 function formatPoint({ x, y, z }) {
     return `${x},${y},${z}`;
@@ -721,7 +801,13 @@ function mapAction(fakePlayerId, action, runtimeDimension, worldQueries) {
             }
             const target = validateBlockTarget(fakePlayerId, action, runtimeDimension, worldQueries);
             return target.ok
-                ? ok({ kind: action.kind, slot: action.slot, position: target.value, face: action.face })
+                ? ok({
+                    kind: action.kind,
+                    slot: action.slot,
+                    position: target.value,
+                    face: action.face,
+                    faceLocation: faceCenter(action.face),
+                })
                 : target;
         }
     }

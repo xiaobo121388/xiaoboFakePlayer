@@ -30,6 +30,7 @@ const recovery = new RecoveryRunner(stateStore, runtime, snapshots, coordinator,
 
 let startupStatus: StartupStatus = { state: "recovering" };
 let nextMineDiagnosticTick = 0;
+let nextPlaceDiagnosticTick = 0;
 const openInteractionForms = new Set<string>();
 const services: CommandServices = {
 	behavior,
@@ -134,16 +135,25 @@ system.runInterval(() => {
 	try {
 		const result = behavior.tick(system.currentTick);
 		if (!result.ok) console.error(`[xiaobo-fake-player] behavior tick failed: ${result.error.message}`);
-		else if (result.value.blockReads > 0 && system.currentTick >= nextMineDiagnosticTick) {
-			const diagnostic = result.value.mineDiagnostic === undefined
-				? ""
-				: `; ${result.value.mineDiagnostic}`;
-			console.info(
-				`[xiaobo-fake-player] mine scan; tick=${system.currentTick}; `
-				+ `considered=${result.value.consideredTasks}; attempted=${result.value.attemptedActions}; `
-				+ `accepted=${result.value.acceptedActions}; blockReads=${result.value.blockReads}${diagnostic}`,
-			);
-			nextMineDiagnosticTick = system.currentTick + 200;
+		else {
+			if (result.value.mineDiagnostic !== undefined && system.currentTick >= nextMineDiagnosticTick) {
+				console.info(
+					`[xiaobo-fake-player] mine diagnostic; tick=${system.currentTick}; `
+					+ `considered=${result.value.consideredTasks}; attempted=${result.value.attemptedActions}; `
+					+ `accepted=${result.value.acceptedActions}; blockReads=${result.value.blockReads}; `
+					+ result.value.mineDiagnostic,
+				);
+				nextMineDiagnosticTick = system.currentTick + 200;
+			}
+			if (result.value.placeDiagnostic !== undefined && system.currentTick >= nextPlaceDiagnosticTick) {
+				console.info(
+					`[xiaobo-fake-player] place diagnostic; tick=${system.currentTick}; `
+					+ `considered=${result.value.consideredTasks}; attempted=${result.value.attemptedActions}; `
+					+ `accepted=${result.value.acceptedActions}; blockReads=${result.value.blockReads}; `
+					+ result.value.placeDiagnostic,
+				);
+				nextPlaceDiagnosticTick = system.currentTick + 200;
+			}
 		}
 	} catch (cause) {
 		const message = cause instanceof Error ? cause.message : String(cause);

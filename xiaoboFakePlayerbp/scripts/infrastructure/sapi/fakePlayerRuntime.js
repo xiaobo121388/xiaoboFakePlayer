@@ -1,4 +1,4 @@
-import { Direction, EntityComponentTypes, GameMode, world } from "@minecraft/server";
+import { Direction, EntityComponentTypes, GameMode, world, } from "@minecraft/server";
 import { getPlayerSkin, PersonaArmSize, PersonaPieceType, SimulatedPlayer, spawnSimulatedPlayer, } from "@minecraft/server-gametest";
 const TAG_PREFIX = "xiaobo_fp_";
 const MAX_EXPERIENCE_CHANGE = 16_777_216;
@@ -155,7 +155,26 @@ export class SapiFakePlayerRuntime {
                 return { accepted, inventoryChanged: accepted };
             }
             case "use_item_on_block": {
-                const accepted = player.useItemInSlotOnBlock(action.slot, action.position, toDirection(action.face));
+                const inventory = player.getComponent(EntityComponentTypes.Inventory);
+                const item = inventory?.container.getItem(action.slot);
+                let accepted;
+                try {
+                    accepted = player.useItemInSlotOnBlock(action.slot, action.position, toDirection(action.face), action.faceLocation);
+                }
+                catch (cause) {
+                    const message = cause instanceof Error ? cause.message : String(cause);
+                    throw new Error(`place ${id}: 使用槽位 ${action.slot} 点击 ${formatPoint(action.position)} `
+                        + `${action.face}@${formatPoint(action.faceLocation)} 失败：${message}`);
+                }
+                const message = `[xiaobo-fake-player] place ${id} accepted=${accepted}; `
+                    + `dimension=${player.dimension.id}; support=${formatPoint(action.position)}; `
+                    + `face=${action.face}; faceLocation=${formatPoint(action.faceLocation)}; `
+                    + `slot=${action.slot}; item=${item === undefined ? "empty" : `${item.typeId}x${item.amount}`}; `
+                    + `mode=${player.getGameMode()}; selectedSlot=${player.selectedSlotIndex}`;
+                if (accepted)
+                    console.info(message);
+                else
+                    console.warn(message);
                 return { accepted, inventoryChanged: accepted };
             }
         }

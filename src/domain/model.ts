@@ -188,6 +188,8 @@ export interface InventoryTransfer {
 
 export type InventoryTransferRequest =
     | { readonly kind: "recycle_all" }
+    | { readonly kind: "swap_inventory" }
+    | { readonly kind: "swap_equipment" }
     | { readonly kind: "swap"; readonly fakeSlot: number; readonly playerSlot: number }
     | { readonly kind: "take"; readonly fakeSlot: number; readonly playerSlot: number }
     | { readonly kind: "put"; readonly fakeSlot: number; readonly playerSlot: number }

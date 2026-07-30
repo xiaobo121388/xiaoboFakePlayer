@@ -13,6 +13,8 @@ import { SapiWorldQueries } from "./infrastructure/sapi/worldQueries.js";
 import { BankedWorldStateStore } from "./infrastructure/state/bankedWorldStateStore.js";
 import { SapiStringPropertyBackend } from "./infrastructure/state/sapiStringPropertyBackend.js";
 import { registerCommands } from "./presentation/commands.js";
+import { openFakePlayerForm } from "./presentation/forms/main.js";
+import { isRealPlayer } from "./presentation/playerContext.js";
 const stateStore = new BankedWorldStateStore(new SapiStringPropertyBackend());
 const runtime = new SapiFakePlayerRuntime();
 const coordinator = new OperationCoordinator();
@@ -25,13 +27,37 @@ const permissions = new PermissionService(stateStore);
 const recovery = new RecoveryRunner(stateStore, runtime, snapshots, coordinator, inventory);
 let startupStatus = { state: "recovering" };
 let nextMineDiagnosticTick = 0;
+const openInteractionForms = new Set();
+const services = {
+    behavior,
+    inventory,
+    lifecycle,
+    permissions,
+    getStartupStatus: () => startupStatus,
+};
 system.beforeEvents.startup.subscribe(({ customCommandRegistry }) => {
-    registerCommands(customCommandRegistry, {
-        behavior,
-        inventory,
-        lifecycle,
-        permissions,
-        getStartupStatus: () => startupStatus,
+    registerCommands(customCommandRegistry, services);
+});
+world.beforeEvents.playerInteractWithEntity.subscribe((event) => {
+    if (event.itemStack !== undefined || !isRealPlayer(event.player))
+        return;
+    const tag = event.target.getTags().find((candidate) => /^xiaobo_fp_fp\d{4,}$/.test(candidate));
+    if (tag === undefined)
+        return;
+    event.cancel = true;
+    const player = event.player;
+    const playerId = player.id;
+    if (openInteractionForms.has(playerId))
+        return;
+    openInteractionForms.add(playerId);
+    const id = tag.slice("xiaobo_fp_".length);
+    system.run(() => {
+        if (!player.isValid) {
+            openInteractionForms.delete(playerId);
+            return;
+        }
+        void openFakePlayerForm(player, services, id)
+            .finally(() => openInteractionForms.delete(playerId));
     });
 });
 world.afterEvents.worldLoad.subscribe(() => {

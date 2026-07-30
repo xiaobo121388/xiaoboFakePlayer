@@ -175,6 +175,15 @@ function buildAfterImages(fakeBefore, playerBefore, transfer) {
     const player = cloneImage(playerBefore);
     const request = transfer.request;
     switch (request.kind) {
+        case "swap_inventory":
+        case "swap_equipment": {
+            const firstSlot = request.kind === "swap_inventory" ? 0 : PLAYER_INVENTORY_SLOT_COUNT;
+            const lastSlot = request.kind === "swap_inventory" ? PLAYER_INVENTORY_SLOT_COUNT : TOTAL_SLOT_COUNT;
+            for (let slot = firstSlot; slot < lastSlot; slot += 1) {
+                [fake[slot], player[slot]] = [player[slot], fake[slot]];
+            }
+            break;
+        }
         case "recycle_all":
             for (let slot = 0; slot < fake.length; slot += 1) {
                 const item = fake[slot];

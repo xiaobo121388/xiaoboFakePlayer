@@ -51,6 +51,19 @@ export async function openMainForm(player: Player, services: CommandServices): P
     });
 }
 
+export async function openFakePlayerForm(
+    player: Player,
+    services: CommandServices,
+    id: FakePlayerRecord["id"],
+): Promise<void> {
+    await formBoundary(player, `target:${id}`, async () => {
+        if (!ready(player, services)) return;
+        const record = loadCurrentRecord(player, services, id);
+        if (!record.ok) return sendError(player, record.error.message);
+        await openDetailForm(player, services, record.value);
+    });
+}
+
 async function openCreateForm(player: Player, services: CommandServices): Promise<void> {
     await formBoundary(player, "create", async () => {
         const location = player.location;

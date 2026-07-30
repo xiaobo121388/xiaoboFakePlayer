@@ -28,6 +28,12 @@ export const CAPABILITY_MATRIX: CapabilityMatrix = {
             detail: "spawnSimulatedPlayer 生命周期与稳定标签重绑定已实现。",
         },
         {
+            id: "entity_interaction_form",
+            availability: "enabled",
+            verification: "bedrock_26_33_required",
+            detail: "空手与假人实体交互可直接打开该假人的设置界面。",
+        },
+        {
             id: "structure_inventory_snapshot",
             availability: "enabled",
             verification: "bedrock_26_33_required",

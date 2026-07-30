@@ -99,6 +99,7 @@ class MemorySnapshots implements InventorySnapshotStore {
 class MemoryInventoryAccess implements InventoryAccess {
     public readonly states = new Map<string, InventoryImageState>();
     public readonly playerExperience = new Map<string, number>();
+    public readonly preparedRequests: InventoryTransfer["request"][] = [];
     public overviewReadCount = 0;
     public applyAfterCount = 0;
     public experienceWriteCount = 0;
@@ -132,6 +133,7 @@ class MemoryInventoryAccess implements InventoryAccess {
     }
 
     public prepareTransfer(transfer: InventoryTransfer): Result<void> {
+        this.preparedRequests.push(transfer.request);
         this.snapshots.ids.add(transfer.fakeAfterSnapshotId);
         this.states.set(transfer.id, "before");
         return ok(undefined);
@@ -317,6 +319,72 @@ test("inventory transfer rejects invalid slots before creating a pending operati
     if (!result.ok) assert.equal(result.error.code, "INVALID_SLOT");
     assert.deepEqual(fixture.state.operations.inventoryTransfers, {});
     assert.equal(fixture.access.applyAfterCount, 0);
+});
+
+test("bulk inventory and equipment swaps use the recoverable transfer pipeline", () => {
+    for (const kind of ["swap_inventory", "swap_equipment"] as const) {
+        const fixture = createFixture();
+
+        const result = fixture.service.transferItems(
+            { playerId: "owner", isOperator: true },
+            fixture.record.id,
+            fixture.record.recordRevision,
+            { kind },
+        );
+
+        assert.equal(result.ok, true);
+        if (!result.ok) continue;
+        assert.deepEqual(fixture.access.preparedRequests, [{ kind }]);
+        assert.equal(result.value.inventoryRevision, 2);
+        assert.equal(fixture.access.applyAfterCount, 1);
+        assert.deepEqual(fixture.state.operations.inventoryTransfers, {});
+    }
+});
+
+test("swap accepts the player offhand slot while one-way transfers still require inventory slots", () => {
+    const swapFixture = createFixture();
+    const swapped = swapFixture.service.transferItems(
+        { playerId: "owner", isOperator: true },
+        swapFixture.record.id,
+        swapFixture.record.recordRevision,
+        { kind: "swap", fakeSlot: 40, playerSlot: 40 },
+    );
+    assert.equal(swapped.ok, true);
+    assert.deepEqual(swapFixture.access.preparedRequests, [{ kind: "swap", fakeSlot: 40, playerSlot: 40 }]);
+
+    const takeFixture = createFixture();
+    const taken = takeFixture.service.transferItems(
+        { playerId: "owner", isOperator: true },
+        takeFixture.record.id,
+        takeFixture.record.recordRevision,
+        { kind: "take", fakeSlot: 40, playerSlot: 40 },
+    );
+    assert.equal(taken.ok, false);
+    if (!taken.ok) assert.equal(taken.error.code, "INVALID_SLOT");
+    assert.deepEqual(takeFixture.access.preparedRequests, []);
+});
+
+test("content recycling transfers items and all experience without deleting the fake player", () => {
+    const fixture = createFixture();
+    fixture.access.playerExperience.set("owner", 5);
+
+    const result = fixture.service.recycleContents(
+        { playerId: "owner", isOperator: true },
+        fixture.record.id,
+        fixture.record.recordRevision,
+    );
+
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.equal(result.value.lifecycle.kind, "offline");
+    assert.equal(result.value.recordRevision, 6);
+    assert.equal(result.value.inventoryRevision, 2);
+    assert.equal(result.value.totalExperience, 0);
+    assert.equal(fixture.access.playerExperience.get("owner"), 25);
+    assert.deepEqual(fixture.access.preparedRequests, [{ kind: "recycle_all" }]);
+    assert.notEqual(fixture.state.catalog.records[fixture.record.id], undefined);
+    assert.deepEqual(fixture.state.operations.inventoryTransfers, {});
+    assert.deepEqual(fixture.state.operations.experienceTransfers, {});
 });
 
 test("recovery completes an applying transfer whose player and catalog already match after", () => {

@@ -171,6 +171,7 @@ function createFixture() {
         name: record.name,
         dimension: "minecraft:nether",
         position: { x: 3, y: 70, z: 4 },
+        headPosition: { x: 3, y: 71.62, z: 4 },
         rotation: { x: 5, y: 90 },
         gameMode: "creative",
         isSneaking: false,

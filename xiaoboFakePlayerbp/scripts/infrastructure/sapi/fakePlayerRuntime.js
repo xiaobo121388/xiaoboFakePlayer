@@ -1,5 +1,5 @@
 import { BlockTypes, Direction, EntityComponentTypes, GameMode, world, } from "@minecraft/server";
-import { getPlayerSkin, LookDuration, PersonaArmSize, PersonaPieceType, SimulatedPlayer, spawnSimulatedPlayer, } from "@minecraft/server-gametest";
+import { getPlayerSkin, PersonaArmSize, PersonaPieceType, SimulatedPlayer, spawnSimulatedPlayer, } from "@minecraft/server-gametest";
 import { INVENTORY_SLOT_COUNT } from "../../domain/inventory.js";
 const TAG_PREFIX = "xiaobo_fp_";
 const MAX_EXPERIENCE_CHANGE = 16_777_216;
@@ -148,7 +148,7 @@ export class SapiFakePlayerRuntime {
                 player.lookAtLocation(action.position);
                 return { accepted: true };
             case "look_at_once":
-                player.lookAtLocation(action.position, LookDuration.Instant);
+                player.setRotation(action.rotation);
                 return { accepted: true };
             case "look_at_entity": {
                 const target = world.getEntity(action.targetId);
@@ -330,6 +330,7 @@ function toRuntimePlayer(id, player) {
         name: player.name,
         dimension: player.dimension.id,
         position: player.location,
+        headPosition: player.getHeadLocation(),
         rotation: player.getRotation(),
         gameMode: fromGameMode(player.getGameMode()),
         isSneaking: player.isSneaking,

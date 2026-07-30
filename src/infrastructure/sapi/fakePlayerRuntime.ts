@@ -10,7 +10,6 @@ import {
 } from "@minecraft/server";
 import {
     getPlayerSkin,
-    LookDuration,
     PersonaArmSize,
     PersonaPieceType,
     SimulatedPlayer,
@@ -173,7 +172,7 @@ export class SapiFakePlayerRuntime implements FakePlayerRuntime {
                 player.lookAtLocation(action.position);
                 return { accepted: true };
             case "look_at_once":
-                player.lookAtLocation(action.position, LookDuration.Instant);
+                player.setRotation(action.rotation);
                 return { accepted: true };
             case "look_at_entity": {
                 const target = world.getEntity(action.targetId);
@@ -364,6 +363,7 @@ function toRuntimePlayer(id: FakePlayerId, player: SimulatedPlayer): RuntimeFake
         name: player.name,
         dimension: player.dimension.id,
         position: player.location,
+        headPosition: player.getHeadLocation(),
         rotation: player.getRotation(),
         gameMode: fromGameMode(player.getGameMode()),
         isSneaking: player.isSneaking,

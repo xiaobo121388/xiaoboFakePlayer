@@ -48,7 +48,12 @@ class MemoryRuntime implements FakePlayerRuntime {
     }
 
     public spawn(request: SpawnFakePlayerRequest): RuntimeFakePlayer {
-        const player = { ...request, isSneaking: false, alive: true };
+        const player = {
+            ...request,
+            headPosition: { x: request.position.x, y: request.position.y + 1.62, z: request.position.z },
+            isSneaking: false,
+            alive: true,
+        };
         this.players.set(request.id, player);
         return player;
     }
@@ -246,6 +251,7 @@ function createFixture() {
         name: record.name,
         dimension: record.location.dimension,
         position: record.location.position,
+        headPosition: { x: 0, y: 65.62, z: 0 },
         rotation: record.location.rotation,
         gameMode: record.gameMode,
         isSneaking: false,
@@ -299,21 +305,21 @@ test("coordinate actions reject cross-dimension and unloaded targets before runt
     assert.equal(fixture.runtime.actions.length, 0);
 });
 
-test("one-shot look uses the AFK direction algorithm while continuous look keeps tracking the entity", () => {
+test("one-shot look sets eye-to-eye rotation while continuous look keeps tracking the entity", () => {
     const fixture = createFixture();
     const operator = { playerId: "operator", isOperator: true };
 
     assert.equal(fixture.service.perform(operator, fixture.record.id, 4, {
         kind: "look_at_once",
         dimension: "minecraft:overworld",
-        position: { x: 3, y: 68, z: 4 },
+        position: { x: 10, y: 75.62, z: 0 },
     }).ok, true);
     assert.equal(fixture.service.perform(operator, fixture.record.id, 4, {
         kind: "look_at_entity",
         targetId: "operator",
     }).ok, true);
     assert.deepEqual(fixture.runtime.actions, [
-        { kind: "look_at_once", position: { x: 468, y: 688, z: 624 } },
+        { kind: "look_at_once", rotation: { x: -45, y: -90 } },
         { kind: "look_at_entity", targetId: "operator" },
     ]);
 });

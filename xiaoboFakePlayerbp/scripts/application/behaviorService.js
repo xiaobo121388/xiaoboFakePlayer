@@ -12,7 +12,6 @@ const FRONT_MINE_RAY_DISTANCE = 7;
 const FRONT_PLACE_RAY_DISTANCE = 7;
 // 非射线目标没有原生命中面，以眼睛位置推导破坏面。
 const MINE_EYE_HEIGHT = 1.62;
-const ONE_SHOT_LOOK_DISTANCE = 1_000;
 const AUTOMATIC_BEHAVIORS = ["follow", "attack", "mine", "place", "use"];
 const CHEST_BLOCK_TYPE_IDS = new Set([
     "minecraft:chest",
@@ -789,10 +788,10 @@ function mapAction(fakePlayerId, action, runtime, worldQueries) {
             }
             if (action.kind === "look_at")
                 return ok({ kind: "look_at", position: action.position });
-            const position = oneShotLookTarget(runtime.position, action.position);
-            return position === undefined
-                ? err("INVALID_STATE", "目标位置与假人位置重合，无需转向。")
-                : ok({ kind: "look_at_once", position });
+            const rotation = lookRotation(runtime.headPosition, action.position);
+            return rotation === undefined
+                ? err("INVALID_STATE", "目标眼睛与假人眼睛重合，无需转向。")
+                : ok({ kind: "look_at_once", rotation });
         }
         case "look_at_entity":
             {
@@ -859,18 +858,16 @@ function mapAction(fakePlayerId, action, runtime, worldQueries) {
         }
     }
 }
-function oneShotLookTarget(origin, target) {
+function lookRotation(origin, target) {
     const x = target.x - origin.x;
     const y = target.y - origin.y;
     const z = target.z - origin.z;
-    const distance = Math.sqrt(x * x + y * y + z * z);
-    if (distance < 0.001)
+    const horizontalDistance = Math.sqrt(x * x + z * z);
+    if (horizontalDistance < 0.001 && Math.abs(y) < 0.001)
         return undefined;
-    // 延伸方向后再取整，避免近距离坐标取整放大朝向误差。
     return {
-        x: Math.trunc(origin.x + x / distance * ONE_SHOT_LOOK_DISTANCE),
-        y: Math.trunc(origin.y + y / distance * ONE_SHOT_LOOK_DISTANCE),
-        z: Math.trunc(origin.z + z / distance * ONE_SHOT_LOOK_DISTANCE),
+        x: -Math.atan2(y, horizontalDistance) * 180 / Math.PI,
+        y: Math.atan2(-x, z) * 180 / Math.PI,
     };
 }
 function validateCoordinateTarget(dimension, position, runtimeDimension, worldQueries) {

@@ -78,6 +78,7 @@ export type RuntimeFakePlayerAction =
     | { readonly kind: "stop_moving" }
     | { readonly kind: "teleport"; readonly location: SavedLocation }
     | { readonly kind: "use_item"; readonly slot: number }
+    | { readonly kind: "place_block_direct"; readonly slot: number; readonly position: Point }
     | {
         readonly kind: "use_item_on_block";
         readonly slot: number;

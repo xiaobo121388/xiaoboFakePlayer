@@ -13,6 +13,11 @@ const FRONT_PLACE_RAY_DISTANCE = 7;
 // 非射线目标没有原生命中面，以眼睛位置推导破坏面。
 const MINE_EYE_HEIGHT = 1.62;
 const AUTOMATIC_BEHAVIORS = ["follow", "attack", "mine", "place", "use"];
+const CHEST_BLOCK_TYPE_IDS = new Set([
+    "minecraft:chest",
+    "minecraft:ender_chest",
+    "minecraft:trapped_chest",
+]);
 const PLACEMENT_SUPPORTS = [
     { offset: { x: 0, y: -1, z: 0 }, face: "up" },
     { offset: { x: 0, y: 1, z: 0 }, face: "down" },
@@ -541,15 +546,20 @@ export class BehaviorService {
             const supportPosition = addPoints(target, candidate.offset);
             const support = this.worldQueries.getBlockInfo(runtime.dimension, supportPosition);
             blockReads += 1;
-            if (support?.solid !== true)
+            if (support === undefined)
                 continue;
-            const receipt = this.executeRuntime(record.id, {
-                kind: "use_item_on_block",
-                slot: config.slot,
-                position: supportPosition,
-                face: candidate.face,
-                faceLocation: faceCenter(candidate.face),
-            });
+            const directPlacement = CHEST_BLOCK_TYPE_IDS.has(support.typeId);
+            if (!directPlacement && support.solid !== true)
+                continue;
+            const receipt = this.executeRuntime(record.id, directPlacement
+                ? { kind: "place_block_direct", slot: config.slot, position: target }
+                : {
+                    kind: "use_item_on_block",
+                    slot: config.slot,
+                    position: supportPosition,
+                    face: candidate.face,
+                    faceLocation: faceCenter(candidate.face),
+                });
             return {
                 attempted: true,
                 accepted: receipt.accepted,
@@ -621,6 +631,7 @@ function interruptsMining(kind) {
     return kind === "break_block"
         || kind === "interact_block"
         || kind === "interact_entity"
+        || kind === "place_block_direct"
         || kind === "stop"
         || kind === "teleport"
         || kind === "use_item"

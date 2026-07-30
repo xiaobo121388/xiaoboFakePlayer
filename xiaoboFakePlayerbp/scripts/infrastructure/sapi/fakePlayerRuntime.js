@@ -1,4 +1,4 @@
-import { Direction, EntityComponentTypes, GameMode, world, } from "@minecraft/server";
+import { BlockTypes, Direction, EntityComponentTypes, GameMode, world, } from "@minecraft/server";
 import { getPlayerSkin, PersonaArmSize, PersonaPieceType, SimulatedPlayer, spawnSimulatedPlayer, } from "@minecraft/server-gametest";
 const TAG_PREFIX = "xiaobo_fp_";
 const MAX_EXPERIENCE_CHANGE = 16_777_216;
@@ -154,6 +154,61 @@ export class SapiFakePlayerRuntime {
             case "use_item": {
                 const accepted = player.useItemInSlot(action.slot);
                 return { accepted, inventoryChanged: accepted };
+            }
+            case "place_block_direct": {
+                let target;
+                let previousPermutation;
+                let placed = false;
+                let itemTypeId = "empty";
+                try {
+                    const inventory = player.getComponent(EntityComponentTypes.Inventory);
+                    const container = inventory?.container;
+                    const item = container?.getItem(action.slot);
+                    itemTypeId = item?.typeId ?? "empty";
+                    const blockType = item === undefined ? undefined : BlockTypes.get(item.typeId);
+                    target = player.dimension.getBlock(action.position);
+                    if (container === undefined || item === undefined || blockType === undefined
+                        || target === undefined || !target.isAir) {
+                        return { accepted: false };
+                    }
+                    const gameMode = player.getGameMode();
+                    const consumesItem = gameMode !== GameMode.Creative;
+                    previousPermutation = target.permutation;
+                    target.setType(blockType);
+                    placed = true;
+                    if (consumesItem) {
+                        if (item.amount === 1) {
+                            container.setItem(action.slot);
+                        }
+                        else {
+                            const remaining = item.clone();
+                            remaining.amount -= 1;
+                            container.setItem(action.slot, remaining);
+                        }
+                    }
+                    console.info(`[xiaobo-fake-player] place ${id} direct accepted=true; `
+                        + `dimension=${player.dimension.id}; target=${formatPoint(action.position)}; `
+                        + `slot=${action.slot}; item=${item.typeId}x${item.amount}; `
+                        + `mode=${gameMode}; consumed=${consumesItem}`);
+                    return { accepted: true, inventoryChanged: consumesItem };
+                }
+                catch (cause) {
+                    let rollback = "";
+                    if (placed && target !== undefined && previousPermutation !== undefined) {
+                        try {
+                            target.setPermutation(previousPermutation);
+                        }
+                        catch (rollbackCause) {
+                            const rollbackMessage = rollbackCause instanceof Error
+                                ? rollbackCause.message
+                                : String(rollbackCause);
+                            rollback = `；回滚目标失败：${rollbackMessage}`;
+                        }
+                    }
+                    const message = cause instanceof Error ? cause.message : String(cause);
+                    throw new Error(`place ${id}: 直接放置槽位 ${action.slot} 的 ${itemTypeId} `
+                        + `到 ${formatPoint(action.position)} 失败：${message}${rollback}`, { cause });
+                }
             }
             case "use_item_on_block": {
                 const inventory = player.getComponent(EntityComponentTypes.Inventory);

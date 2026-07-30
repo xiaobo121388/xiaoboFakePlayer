@@ -24,7 +24,7 @@ flowchart LR
 |---|---|
 | `LifecycleService` | 创建、上下线、重命名、删除、复活及稳定 record revision |
 | `InventoryService` | 在线活体/离线快照概览、检查点、41 槽物品/经验事务和 pending 恢复 |
-| `BehaviorService` | 即时动作、自动行为配置、公平调度和全局方块读取预算 |
+| `BehaviorService` | 即时动作、自动行为配置、寻路优先级仲裁、公平调度和全局方块读取预算 |
 
 三个服务共享 `OperationCoordinator`。写用例按排序后的 `fake:<id>` 和 `player:<playfabId>` 获取 lease；表单等待期间不持有 lease，提交时重新鉴权并检查 record revision。
 

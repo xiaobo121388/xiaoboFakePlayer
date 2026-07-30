@@ -1,5 +1,9 @@
 import { INVENTORY_SLOT_COUNT } from "../domain/inventory.js";
-import { decodeBehaviorConfig } from "../domain/behavior.js";
+import {
+    decodeBehaviorConfig,
+    EXCLUSIVE_ACTION_BEHAVIORS,
+    normalizeExclusiveActionBehaviors,
+} from "../domain/behavior.js";
 import type {
     BehaviorConfig,
     DimensionKey,
@@ -206,11 +210,18 @@ export class BehaviorService {
                     `期望 revision ${expectedRecordRevision}，实际为 ${record.recordRevision}。`,
                 );
             }
-            if (behaviorConfigsEqual(record.behavior, normalized)) return ok(record);
+            const newlyEnabled = EXCLUSIVE_ACTION_BEHAVIORS.filter(
+                (kind) => !record.behavior[kind].enabled && normalized[kind].enabled,
+            );
+            if (newlyEnabled.length > 1) {
+                return err("INVALID_STATE", "攻击、挖掘、放置和定时使用一次只能启用一种。");
+            }
+            const nextBehavior = normalizeExclusiveActionBehaviors(normalized, newlyEnabled[0]);
+            if (behaviorConfigsEqual(record.behavior, nextBehavior)) return ok(record);
             const nextRecord: FakePlayerRecord = {
                 ...record,
                 recordRevision: record.recordRevision + 1,
-                behavior: normalized,
+                behavior: nextBehavior,
             };
             const committed = this.stateStore.commitCatalog(catalog.state.revision, {
                 ...catalog.state.value,

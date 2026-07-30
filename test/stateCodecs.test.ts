@@ -169,6 +169,26 @@ test("catalog codec migrates legacy behavior and skin while validating schema th
             },
         },
     }), undefined);
+    const multipleActionBehaviors = createDefaultBehaviorConfig();
+    const normalizedActions = catalogCodec.decode(3, {
+        nextId: 2,
+        records: {
+            fp0001: {
+                ...legacyRecord,
+                behavior: {
+                    ...multipleActionBehaviors,
+                    attack: { ...multipleActionBehaviors.attack, enabled: true },
+                    mine: { ...multipleActionBehaviors.mine, enabled: true },
+                    use: { ...multipleActionBehaviors.use, enabled: true },
+                },
+                skin: { kind: "default" },
+            },
+        },
+    });
+    assert.equal(normalizedActions?.records.fp0001?.behavior.attack.enabled, true);
+    assert.equal(normalizedActions?.records.fp0001?.behavior.mine.enabled, false);
+    assert.equal(normalizedActions?.records.fp0001?.behavior.place.enabled, false);
+    assert.equal(normalizedActions?.records.fp0001?.behavior.use.enabled, false);
     const persona = {
         kind: "persona",
         armSize: "Slim",

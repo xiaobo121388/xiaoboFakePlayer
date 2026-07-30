@@ -1,4 +1,5 @@
 const MAX_INTERVAL_TICKS = 72_000;
+export const EXCLUSIVE_ACTION_BEHAVIORS = ["attack", "mine", "place", "use"];
 export function createDefaultBehaviorConfig() {
     return {
         follow: {
@@ -46,6 +47,20 @@ export function decodeBehaviorConfig(payload) {
         || place === undefined || use === undefined
         ? undefined
         : { follow, attack, mine, place, use };
+}
+export function normalizeExclusiveActionBehaviors(config, preferredKind) {
+    const enabledKind = preferredKind !== undefined && config[preferredKind].enabled
+        ? preferredKind
+        : EXCLUSIVE_ACTION_BEHAVIORS.find((kind) => config[kind].enabled);
+    if (EXCLUSIVE_ACTION_BEHAVIORS.every((kind) => config[kind].enabled === (kind === enabledKind)))
+        return config;
+    return {
+        ...config,
+        attack: { ...config.attack, enabled: enabledKind === "attack" },
+        mine: { ...config.mine, enabled: enabledKind === "mine" },
+        place: { ...config.place, enabled: enabledKind === "place" },
+        use: { ...config.use, enabled: enabledKind === "use" },
+    };
 }
 function decodeFollow(payload) {
     const value = asObject(payload);

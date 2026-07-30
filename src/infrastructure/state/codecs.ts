@@ -1,4 +1,8 @@
-import { createDefaultBehaviorConfig, decodeBehaviorConfig } from "../../domain/behavior.js";
+import {
+    createDefaultBehaviorConfig,
+    decodeBehaviorConfig,
+    normalizeExclusiveActionBehaviors,
+} from "../../domain/behavior.js";
 import type {
     ExperienceTransfer,
     FakePlayerGameMode,
@@ -107,9 +111,12 @@ function decodeFakePlayerRecord(payload: unknown, schemaVersion: number): FakePl
     }
     const lifecycle = decodeLifecycleStatus(value.lifecycle);
     const location = decodeSavedLocation(value.location);
-    const behavior = schemaVersion === 1 && value.behavior === undefined
+    const decodedBehavior = schemaVersion === 1 && value.behavior === undefined
         ? createDefaultBehaviorConfig()
         : decodeBehaviorConfig(value.behavior);
+    const behavior = decodedBehavior === undefined
+        ? undefined
+        : normalizeExclusiveActionBehaviors(decodedBehavior);
     const skin = schemaVersion < 3 && value.skin === undefined
         ? DEFAULT_FAKE_PLAYER_SKIN
         : decodeFakePlayerSkin(value.skin);

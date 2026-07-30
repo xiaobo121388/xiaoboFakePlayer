@@ -70,14 +70,20 @@ class MemoryStateStore implements WorldStateStore {
 }
 
 class MemoryRuntime implements FakePlayerRuntime {
-    public constructor(public player: RuntimeFakePlayer) {}
+    public readonly players = new Map<FakePlayerId, RuntimeFakePlayer>();
+
+    public constructor(player: RuntimeFakePlayer) {
+        this.players.set(player.id, player);
+    }
 
     public capturePlayerSkin() {
         return undefined;
     }
 
     public spawn(_request: SpawnFakePlayerRequest): RuntimeFakePlayer {
-        return this.player;
+        const player = this.players.values().next().value;
+        if (player === undefined) throw new Error("memory runtime has no fake player");
+        return player;
     }
 
     public disconnect(): boolean {
@@ -97,11 +103,11 @@ class MemoryRuntime implements FakePlayerRuntime {
     }
 
     public get(id: FakePlayerId): RuntimeFakePlayer | undefined {
-        return id === this.player.id ? this.player : undefined;
+        return this.players.get(id);
     }
 
     public listTagged(): readonly RuntimeFakePlayer[] {
-        return [this.player];
+        return [...this.players.values()];
     }
 }
 
@@ -207,6 +213,37 @@ test("checkpoint polling skips a clean fake player before its next periodic chec
     assert.deepEqual(result, ok(undefined));
     assert.equal(fixture.state.catalogRevision, 0);
     assert.deepEqual(fixture.snapshots.removals, []);
+});
+
+test("checkpoint polling saves all ten online fake players once within twenty ticks", () => {
+    const fixture = createFixture();
+    const records = Object.fromEntries(Array.from({ length: 10 }, (_, index) => {
+        const sequence = index + 1;
+        const id = `fp${String(sequence).padStart(4, "0")}`;
+        const record = {
+            ...fixture.record,
+            id,
+            name: `Fake ${sequence}`,
+            lastCheckpointTick: 0,
+        };
+        fixture.runtime.players.set(id, { ...fixture.runtime.players.get(fixture.record.id)!, id, name: record.name });
+        fixture.snapshots.ids.add(snapshotId(id, 1));
+        return [id, record];
+    }));
+    fixture.state.catalog = { nextId: 11, records };
+
+    const checkpointedIds: FakePlayerId[] = [];
+    for (let tick = 20; tick < 40; tick += 2) {
+        const result = fixture.service.checkpointNext(tick);
+        assert.equal(result.ok, true);
+        if (result.ok && result.value !== undefined) checkpointedIds.push(result.value.record.id);
+    }
+
+    assert.deepEqual(checkpointedIds, Object.keys(records));
+    assert.deepEqual(fixture.service.checkpointNext(39), ok(undefined));
+    const nextSecond = fixture.service.checkpointNext(40);
+    assert.equal(nextSecond.ok, true);
+    if (nextSecond.ok) assert.equal(nextSecond.value?.record.id, "fp0001");
 });
 
 test("checkpoint polling skips fake players with pending transfers", () => {

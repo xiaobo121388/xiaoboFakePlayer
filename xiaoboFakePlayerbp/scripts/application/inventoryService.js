@@ -1,7 +1,7 @@
 import { INVENTORY_SLOT_COUNT, TOTAL_SLOT_COUNT } from "../domain/inventory.js";
 import { isAllowed } from "../domain/permissions.js";
 import { err, ok } from "../domain/results.js";
-const PERIODIC_CHECKPOINT_INTERVAL_TICKS = 1_200;
+const PERIODIC_CHECKPOINT_INTERVAL_TICKS = 20;
 export class InventoryService {
     stateStore;
     runtime;

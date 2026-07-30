@@ -1,6 +1,7 @@
 import { world } from "@minecraft/server";
 import { ActionFormData, ModalFormData } from "@minecraft/server-ui";
 import { actorIdentity, isRealPlayer } from "../playerContext.js";
+import { behaviorChangeMessage } from "./behaviorChangeMessage.js";
 import { formBoundary, ready, sendError, t } from "./formSupport.js";
 const MINE_DIRECTIONS = ["front", "down", "up"];
 const PLACE_MODES = ["front", "position"];
@@ -200,7 +201,8 @@ async function saveBehavior(player, services, record, config, openDetail) {
     const result = services.behavior.updateBehaviorConfig(actorIdentity(player), record.id, record.recordRevision, record.behavior, config);
     if (!result.ok)
         return sendError(player, result.error.message);
-    player.sendMessage({ translate: "xiaobo.fp.message.saved", with: [result.value.name] });
+    player.sendMessage(behaviorChangeMessage(result.value.name, record.behavior, result.value.behavior)
+        ?? { translate: "xiaobo.fp.message.saved", with: [result.value.name] });
     await openDetail(result.value);
 }
 function addBehaviorButton(form, actions, kind, enabled, action) {

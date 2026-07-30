@@ -4,6 +4,7 @@ import { ActionFormData, ModalFormData } from "@minecraft/server-ui";
 import type { BehaviorConfig, FakePlayerRecord, Point } from "../../domain/model.js";
 import type { CommandServices } from "../commands.js";
 import { actorIdentity, isRealPlayer } from "../playerContext.js";
+import { behaviorChangeMessage } from "./behaviorChangeMessage.js";
 import { formBoundary, ready, sendError, t } from "./formSupport.js";
 
 const MINE_DIRECTIONS: readonly BehaviorConfig["mine"]["direction"][] = ["front", "down", "up"];
@@ -263,7 +264,8 @@ async function saveBehavior(
         config,
     );
     if (!result.ok) return sendError(player, result.error.message);
-    player.sendMessage({ translate: "xiaobo.fp.message.saved", with: [result.value.name] });
+    player.sendMessage(behaviorChangeMessage(result.value.name, record.behavior, result.value.behavior)
+        ?? { translate: "xiaobo.fp.message.saved", with: [result.value.name] });
     await openDetail(result.value);
 }
 

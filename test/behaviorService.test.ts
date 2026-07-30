@@ -65,6 +65,7 @@ class MemoryRuntime implements FakePlayerRuntime {
             || action.kind === "break_block"
             || action.kind === "interact_block"
             || action.kind === "interact_entity"
+            || action.kind === "place_block_direct"
             || action.kind === "use_item"
             || action.kind === "use_item_on_block";
         return changesInventory ? { accepted: true, inventoryChanged: true } : { accepted: true };
@@ -698,6 +699,43 @@ test("automatic coordinate placement resolves the target cell to an adjacent sup
         position: { x: 3, y: 63, z: 0 },
         face: "up",
         faceLocation: { x: 0.5, y: 1, z: 0.5 },
+    }]);
+});
+
+test("automatic coordinate placement directly places when a chest support is not reported solid", () => {
+    const fixture = createFixture();
+    const operator = { playerId: "operator", isOperator: true };
+    const config = {
+        ...createDefaultBehaviorConfig(),
+        place: {
+            enabled: true,
+            intervalTicks: 10,
+            mode: "position" as const,
+            position: { x: 3, y: 64, z: 0 },
+            slot: 2,
+        },
+    };
+    fixture.queries.blockInfoByPosition.set("3:64:0", { typeId: "minecraft:air", solid: false });
+    fixture.queries.blockInfoByPosition.set("3:63:0", { typeId: "minecraft:chest", solid: false });
+    assert.equal(fixture.service.updateBehaviorConfig(
+        operator,
+        fixture.record.id,
+        4,
+        fixture.record.behavior,
+        config,
+    ).ok, true);
+    fixture.runtime.actions.length = 0;
+
+    const result = fixture.service.tick(0);
+    assert.equal(result.ok, true);
+    if (result.ok) {
+        assert.equal(result.value.blockReads, 2);
+        assert.match(result.value.placeDiagnostic ?? "", /state=accepted/);
+    }
+    assert.deepEqual(fixture.runtime.actions, [{
+        kind: "place_block_direct",
+        slot: 2,
+        position: { x: 3, y: 64, z: 0 },
     }]);
 });
 

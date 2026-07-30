@@ -25,6 +25,7 @@ function record(kind: "online" | "offline", revision = 2): FakePlayerRecord {
         respawnMode: "manual",
         respawnLocation: null,
         inventoryRevision: null,
+        inventoryFallbackRevision: null,
         lastCheckpointTick: null,
         behavior: createDefaultBehaviorConfig(),
     };

@@ -162,6 +162,7 @@ function createFixture() {
         respawnMode: "manual" as const,
         respawnLocation: null,
         inventoryRevision: 1,
+        inventoryFallbackRevision: null,
         lastCheckpointTick: 10,
         behavior: createDefaultBehaviorConfig(),
     };
@@ -191,7 +192,7 @@ function createFixture() {
     return { record, state, runtime, snapshots, service };
 }
 
-test("checkpoint commits the verified image before removing the previous snapshot", () => {
+test("checkpoint commits the verified image while retaining the previous snapshot for recovery", () => {
     const fixture = createFixture();
     const result = fixture.service.checkpoint(fixture.record.id, 4, 40);
 
@@ -200,10 +201,34 @@ test("checkpoint commits the verified image before removing the previous snapsho
     assert.equal(result.value.structureId, snapshotId(fixture.record.id, 2));
     assert.equal(result.value.record.recordRevision, 5);
     assert.equal(result.value.record.inventoryRevision, 2);
+    assert.equal(result.value.record.inventoryFallbackRevision, 1);
     assert.equal(result.value.record.lastCheckpointTick, 40);
     assert.equal(result.value.record.location.dimension, "minecraft:nether");
-    assert.deepEqual(fixture.snapshots.removals, [snapshotId(fixture.record.id, 1)]);
+    assert.deepEqual(fixture.snapshots.removals, []);
+    assert.equal(fixture.snapshots.has(snapshotId(fixture.record.id, 1)), true);
     assert.equal(fixture.snapshots.has(snapshotId(fixture.record.id, 2)), true);
+});
+
+test("checkpoint rotation retains exactly the current and previous snapshots", () => {
+    const fixture = createFixture();
+    const second = fixture.service.checkpoint(fixture.record.id, fixture.record.recordRevision, 40);
+    assert.equal(second.ok, true);
+    if (!second.ok) return;
+
+    const third = fixture.service.checkpoint(
+        second.value.record.id,
+        second.value.record.recordRevision,
+        60,
+    );
+
+    assert.equal(third.ok, true);
+    if (!third.ok) return;
+    assert.equal(third.value.record.inventoryRevision, 3);
+    assert.equal(third.value.record.inventoryFallbackRevision, 2);
+    assert.equal(fixture.snapshots.has(snapshotId(fixture.record.id, 1)), false);
+    assert.equal(fixture.snapshots.has(snapshotId(fixture.record.id, 2)), true);
+    assert.equal(fixture.snapshots.has(snapshotId(fixture.record.id, 3)), true);
+    assert.deepEqual(fixture.snapshots.removals, [snapshotId(fixture.record.id, 1)]);
 });
 
 test("checkpoint polling skips a clean fake player before its next periodic checkpoint", () => {

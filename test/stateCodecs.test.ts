@@ -29,7 +29,7 @@ test("aggregate codecs provide valid schema-one initial values", () => {
 });
 
 test("aggregate codecs reject malformed and unknown-schema payloads", () => {
-    assert.equal(catalogCodec.decode(4, catalogCodec.initialValue), undefined);
+    assert.equal(catalogCodec.decode(5, catalogCodec.initialValue), undefined);
     assert.equal(catalogCodec.decode(1, { nextId: 0, records: {} }), undefined);
     assert.equal(permissionCodec.decode(1, {
         grants: { stable: { playerId: "different", lastKnownName: "Alex", canPlace: true, canSet: false } },
@@ -58,6 +58,7 @@ test("operations codec preserves every recoverable inventory request", () => {
             playerId: "owner",
             fakePlayerRevision: 4,
             fakeSnapshotId: "xiaobo:fp0001_inv_1",
+            fakeFallbackSnapshotId: "xiaobo:fp0001_inv_0",
             fakeAfterSnapshotId: "xiaobo:fp0001_inv_2",
             request,
             beforeStructureId: "before",
@@ -70,7 +71,34 @@ test("operations codec preserves every recoverable inventory request", () => {
             experienceTransfers: {},
         });
         assert.deepEqual(decoded?.inventoryTransfers[transfer.id]?.request, request);
+        assert.equal(
+            decoded?.inventoryTransfers[transfer.id]?.fakeFallbackSnapshotId,
+            transfer.fakeFallbackSnapshotId,
+        );
     }
+});
+
+test("operations codec accepts legacy inventory transfers without fallback metadata", () => {
+    const transfer = {
+        id: "fp0001:inventory:4",
+        fakePlayerId: "fp0001",
+        playerId: "owner",
+        fakePlayerRevision: 4,
+        fakeSnapshotId: "xiaobo:fp0001_inv_1",
+        fakeAfterSnapshotId: "xiaobo:fp0001_inv_2",
+        request: { kind: "recycle_all" },
+        beforeStructureId: "before",
+        afterStructureId: "after",
+        phase: "checkpointed",
+    };
+
+    const decoded = operationsCodec.decode(2, {
+        workspace: {},
+        inventoryTransfers: { [transfer.id]: transfer },
+        experienceTransfers: {},
+    });
+
+    assert.equal(decoded?.inventoryTransfers[transfer.id]?.fakeFallbackSnapshotId, undefined);
 });
 
 test("world state aggregates commit with independent revisions", () => {
@@ -96,7 +124,7 @@ test("world state aggregates commit with independent revisions", () => {
     assert.equal(operations.ok && operations.state.revision, 0);
 });
 
-test("catalog codec migrates legacy behavior and skin while validating schema three", () => {
+test("catalog codec migrates legacy records while validating schema four", () => {
     const legacyRecord = {
         id: "fp0001",
         name: "Alex",
@@ -231,6 +259,40 @@ test("catalog codec migrates legacy behavior and skin while validating schema th
         },
     });
     assert.deepEqual(schemaThree?.records.fp0001?.skin, persona);
+    const schemaThreeWithInventory = catalogCodec.decode(3, {
+        nextId: 2,
+        records: {
+            fp0001: {
+                ...legacyRecord,
+                behavior: createDefaultBehaviorConfig(),
+                skin: { kind: "default" },
+                inventoryRevision: 12,
+            },
+        },
+    });
+    assert.equal(schemaThreeWithInventory?.records.fp0001?.inventoryFallbackRevision, 11);
+    const schemaFour = catalogCodec.decode(4, {
+        nextId: 2,
+        records: {
+            fp0001: {
+                ...legacyRecord,
+                behavior: createDefaultBehaviorConfig(),
+                skin: { kind: "default" },
+                inventoryFallbackRevision: null,
+            },
+        },
+    });
+    assert.equal(schemaFour?.records.fp0001?.inventoryFallbackRevision, null);
+    assert.equal(catalogCodec.decode(4, {
+        nextId: 2,
+        records: {
+            fp0001: {
+                ...legacyRecord,
+                behavior: createDefaultBehaviorConfig(),
+                skin: { kind: "default" },
+            },
+        },
+    }), undefined);
     assert.equal(catalogCodec.decode(3, {
         nextId: 2,
         records: {

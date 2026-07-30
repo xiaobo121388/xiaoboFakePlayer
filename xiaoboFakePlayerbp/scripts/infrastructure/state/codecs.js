@@ -18,11 +18,12 @@ const PERSONA_PIECE_TYPES = new Set([
     "Outerwear", "RightArm", "RightLeg", "Skeleton", "Skin", "Top",
 ]);
 export const catalogCodec = {
-    schemaVersion: 3,
+    schemaVersion: 4,
     initialValue: { nextId: 1, records: {} },
     decode(schemaVersion, payload) {
-        if (schemaVersion !== 1 && schemaVersion !== 2 && schemaVersion !== 3)
+        if (schemaVersion !== 1 && schemaVersion !== 2 && schemaVersion !== 3 && schemaVersion !== 4) {
             return undefined;
+        }
         const value = asObject(payload);
         const records = value === undefined
             ? undefined
@@ -84,7 +85,18 @@ function decodeFakePlayerRecord(payload, schemaVersion) {
         || !isNonNegativeInteger(value.totalExperience)
         || !isRespawnMode(value.respawnMode)
         || !isNullableNonNegativeInteger(value.inventoryRevision)
+        || (schemaVersion === 4
+            ? !isNullableNonNegativeInteger(value.inventoryFallbackRevision)
+            : value.inventoryFallbackRevision !== undefined
+                && !isNullableNonNegativeInteger(value.inventoryFallbackRevision))
         || !isNullableNonNegativeInteger(value.lastCheckpointTick)) {
+        return undefined;
+    }
+    const inventoryFallbackRevision = decodeInventoryFallbackRevision(schemaVersion, value.inventoryRevision, value.inventoryFallbackRevision);
+    if (inventoryFallbackRevision === undefined)
+        return undefined;
+    if (inventoryFallbackRevision !== null
+        && (value.inventoryRevision === null || inventoryFallbackRevision >= value.inventoryRevision)) {
         return undefined;
     }
     const lifecycle = decodeLifecycleStatus(value.lifecycle);
@@ -120,9 +132,18 @@ function decodeFakePlayerRecord(payload, schemaVersion) {
         respawnMode: value.respawnMode,
         respawnLocation,
         inventoryRevision: value.inventoryRevision,
+        inventoryFallbackRevision,
         lastCheckpointTick: value.lastCheckpointTick,
         behavior,
     };
+}
+function decodeInventoryFallbackRevision(schemaVersion, inventoryRevision, payload) {
+    if (payload === undefined) {
+        if (schemaVersion >= 4)
+            return undefined;
+        return inventoryRevision !== null && inventoryRevision > 1 ? inventoryRevision - 1 : null;
+    }
+    return isNullableNonNegativeInteger(payload) ? payload : undefined;
 }
 function decodeLifecycleStatus(payload) {
     const value = asObject(payload);
@@ -229,6 +250,7 @@ function decodeInventoryTransfer(payload) {
         && isString(value.playerId)
         && isNonNegativeInteger(value.fakePlayerRevision)
         && isString(value.fakeSnapshotId)
+        && (value.fakeFallbackSnapshotId === undefined || isString(value.fakeFallbackSnapshotId))
         && isString(value.fakeAfterSnapshotId)
         && request !== undefined
         && isString(value.beforeStructureId)
@@ -240,6 +262,9 @@ function decodeInventoryTransfer(payload) {
             playerId: value.playerId,
             fakePlayerRevision: value.fakePlayerRevision,
             fakeSnapshotId: value.fakeSnapshotId,
+            ...(value.fakeFallbackSnapshotId === undefined
+                ? {}
+                : { fakeFallbackSnapshotId: value.fakeFallbackSnapshotId }),
             fakeAfterSnapshotId: value.fakeAfterSnapshotId,
             request,
             beforeStructureId: value.beforeStructureId,

@@ -44,10 +44,12 @@ const PERSONA_PIECE_TYPES = new Set([
 ]);
 
 export const catalogCodec: StateCodec<WorldCatalog> = {
-    schemaVersion: 3,
+    schemaVersion: 4,
     initialValue: { nextId: 1, records: {} },
     decode(schemaVersion, payload) {
-        if (schemaVersion !== 1 && schemaVersion !== 2 && schemaVersion !== 3) return undefined;
+        if (schemaVersion !== 1 && schemaVersion !== 2 && schemaVersion !== 3 && schemaVersion !== 4) {
+            return undefined;
+        }
         const value = asObject(payload);
         const records = value === undefined
             ? undefined
@@ -106,7 +108,21 @@ function decodeFakePlayerRecord(payload: unknown, schemaVersion: number): FakePl
         || !isNonNegativeInteger(value.totalExperience)
         || !isRespawnMode(value.respawnMode)
         || !isNullableNonNegativeInteger(value.inventoryRevision)
+        || (schemaVersion === 4
+            ? !isNullableNonNegativeInteger(value.inventoryFallbackRevision)
+            : value.inventoryFallbackRevision !== undefined
+                && !isNullableNonNegativeInteger(value.inventoryFallbackRevision))
         || !isNullableNonNegativeInteger(value.lastCheckpointTick)) {
+        return undefined;
+    }
+    const inventoryFallbackRevision = decodeInventoryFallbackRevision(
+        schemaVersion,
+        value.inventoryRevision,
+        value.inventoryFallbackRevision,
+    );
+    if (inventoryFallbackRevision === undefined) return undefined;
+    if (inventoryFallbackRevision !== null
+        && (value.inventoryRevision === null || inventoryFallbackRevision >= value.inventoryRevision)) {
         return undefined;
     }
     const lifecycle = decodeLifecycleStatus(value.lifecycle);
@@ -142,9 +158,22 @@ function decodeFakePlayerRecord(payload: unknown, schemaVersion: number): FakePl
         respawnMode: value.respawnMode,
         respawnLocation,
         inventoryRevision: value.inventoryRevision,
+        inventoryFallbackRevision,
         lastCheckpointTick: value.lastCheckpointTick,
         behavior,
     };
+}
+
+function decodeInventoryFallbackRevision(
+    schemaVersion: number,
+    inventoryRevision: number | null,
+    payload: unknown,
+): number | null | undefined {
+    if (payload === undefined) {
+        if (schemaVersion >= 4) return undefined;
+        return inventoryRevision !== null && inventoryRevision > 1 ? inventoryRevision - 1 : null;
+    }
+    return isNullableNonNegativeInteger(payload) ? payload : undefined;
 }
 
 function decodeLifecycleStatus(payload: unknown): LifecycleStatus | undefined {
@@ -255,6 +284,7 @@ function decodeInventoryTransfer(payload: unknown): InventoryTransfer | undefine
         && isString(value.playerId)
         && isNonNegativeInteger(value.fakePlayerRevision)
         && isString(value.fakeSnapshotId)
+        && (value.fakeFallbackSnapshotId === undefined || isString(value.fakeFallbackSnapshotId))
         && isString(value.fakeAfterSnapshotId)
         && request !== undefined
         && isString(value.beforeStructureId)
@@ -266,6 +296,9 @@ function decodeInventoryTransfer(payload: unknown): InventoryTransfer | undefine
             playerId: value.playerId,
             fakePlayerRevision: value.fakePlayerRevision,
             fakeSnapshotId: value.fakeSnapshotId,
+            ...(value.fakeFallbackSnapshotId === undefined
+                ? {}
+                : { fakeFallbackSnapshotId: value.fakeFallbackSnapshotId }),
             fakeAfterSnapshotId: value.fakeAfterSnapshotId,
             request,
             beforeStructureId: value.beforeStructureId,

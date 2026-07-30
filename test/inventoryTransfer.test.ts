@@ -271,6 +271,7 @@ function createFixture() {
         respawnMode: "manual",
         respawnLocation: null,
         inventoryRevision: 1,
+        inventoryFallbackRevision: null,
         lastCheckpointTick: 10,
         behavior: createDefaultBehaviorConfig(),
     };
@@ -307,6 +308,35 @@ test("inventory transfer commits the after snapshot before removing the old auth
     assert.equal(fixture.snapshots.has(snapshotId(fixture.record.id, 1)), false);
     assert.equal(fixture.snapshots.has(snapshotId(fixture.record.id, 2)), true);
     assert.deepEqual(fixture.state.operations.inventoryTransfers, {});
+});
+
+test("inventory transfer removes a non-adjacent fallback after ownership changes", () => {
+    const fixture = createFixture();
+    const record: FakePlayerRecord = {
+        ...fixture.record,
+        inventoryRevision: 4,
+        inventoryFallbackRevision: 1,
+    };
+    fixture.state.catalog = {
+        ...fixture.state.catalog,
+        records: { [record.id]: record },
+    };
+    fixture.snapshots.ids.add(snapshotId(record.id, 4));
+
+    const result = fixture.service.transferItems(
+        { playerId: "owner", isOperator: true },
+        record.id,
+        record.recordRevision,
+        { kind: "recycle_all" },
+    );
+
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.equal(result.value.inventoryRevision, 5);
+    assert.equal(result.value.inventoryFallbackRevision, null);
+    assert.equal(fixture.snapshots.has(snapshotId(record.id, 1)), false);
+    assert.equal(fixture.snapshots.has(snapshotId(record.id, 4)), false);
+    assert.equal(fixture.snapshots.has(snapshotId(record.id, 5)), true);
 });
 
 test("inventory overview reads the authoritative offline snapshot after revision validation", () => {

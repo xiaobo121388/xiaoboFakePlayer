@@ -4,7 +4,7 @@ import { DEFAULT_FAKE_PLAYER_SKIN } from "../domain/model.js";
 import { isAllowed } from "../domain/permissions.js";
 import { err, ok } from "../domain/results.js";
 import { formatFakePlayerId, MAX_FAKE_PLAYERS, reserveUniqueName } from "../domain/validation.js";
-import { snapshotId } from "./inventoryService.js";
+import { availableInventoryFallbackRevision, restoreInventorySnapshot, snapshotId, } from "./inventoryService.js";
 export class LifecycleService {
     stateStore;
     runtime;
@@ -130,10 +130,21 @@ export class LifecycleService {
             const offline = transitionLifecycle(verified.value, verified.value.recordRevision, { kind: "offline" });
             if (!offline.ok)
                 return offline;
-            const finalRecord = { ...offline.value, inventoryRevision: snapshotRevision };
+            const fallbackRevision = availableInventoryFallbackRevision(this.snapshots, context.value.record);
+            const finalRecord = {
+                ...offline.value,
+                inventoryRevision: snapshotRevision,
+                inventoryFallbackRevision: fallbackRevision,
+            };
             const committed = commitCatalogRecord(this.stateStore, verifiedCommit.value.catalogRevision, verifiedCommit.value.catalog, finalRecord);
             if (!committed.ok)
                 return committed;
+            if (context.value.record.inventoryFallbackRevision !== null
+                && context.value.record.inventoryFallbackRevision !== fallbackRevision) {
+                const removed = this.snapshots.remove(snapshotId(id, context.value.record.inventoryFallbackRevision));
+                if (!removed.ok)
+                    return removed;
+            }
             this.runtime.disconnect(id);
             return ok(committed.value.record);
         }
@@ -174,15 +185,24 @@ export class LifecycleService {
                 selectedSlot: pending.value.selectedSlot,
                 totalExperience: pending.value.totalExperience,
             });
-            if (pending.value.inventoryRevision !== null) {
-                const restored = this.snapshots.restore(id, snapshotId(id, pending.value.inventoryRevision));
-                if (!restored.ok)
-                    return restored;
+            const restored = restoreInventorySnapshot(this.snapshots, pending.value);
+            if (!restored.ok) {
+                return this.runtime.disconnect(id)
+                    ? restored
+                    : err("CONFLICT", `${restored.error.message}；且无法断开未恢复库存的假人 ${id}。`);
             }
             const online = transitionLifecycle(pending.value, pending.value.recordRevision, { kind: "online" });
             if (!online.ok)
                 return online;
-            const committed = commitCatalogRecord(this.stateStore, prepared.value.catalogRevision, prepared.value.catalog, online.value);
+            const finalRecord = restored.value.usedFallback
+                ? {
+                    ...online.value,
+                    inventoryRevision: restored.value.inventoryRevision,
+                    inventoryFallbackRevision: restored.value.inventoryFallbackRevision,
+                    lastCheckpointTick: null,
+                }
+                : online.value;
+            const committed = commitCatalogRecord(this.stateStore, prepared.value.catalogRevision, prepared.value.catalog, finalRecord);
             return committed.ok ? ok(committed.value.record) : committed;
         }
         finally {
@@ -377,13 +397,28 @@ export class LifecycleService {
                     return err("CONFLICT", `无法断开旧名称假人 ${context.record.id}。`);
                 }
             }
-            if (this.runtime.get(context.record.id) === undefined)
+            const spawned = this.runtime.get(context.record.id) === undefined;
+            if (spawned)
                 this.runtime.spawn(spawnRequest(context.record));
-            if (context.record.inventoryRevision !== null) {
-                const restored = this.snapshots.restore(context.record.id, snapshotId(context.record.id, context.record.inventoryRevision));
-                if (!restored.ok)
+            const restored = restoreInventorySnapshot(this.snapshots, context.record);
+            if (!restored.ok) {
+                if (!spawned)
                     return restored;
+                return this.runtime.disconnect(context.record.id)
+                    ? restored
+                    : err("CONFLICT", `${restored.error.message}；且无法断开未恢复库存的假人 ${context.record.id}。`);
             }
+            context = restored.value.usedFallback
+                ? {
+                    ...context,
+                    record: {
+                        ...context.record,
+                        inventoryRevision: restored.value.inventoryRevision,
+                        inventoryFallbackRevision: restored.value.inventoryFallbackRevision,
+                        lastCheckpointTick: null,
+                    },
+                }
+                : context;
         }
         else if (this.runtime.get(context.record.id) !== undefined && !this.runtime.disconnect(context.record.id)) {
             return err("CONFLICT", `无法断开离线重命名假人 ${context.record.id}。`);
@@ -408,6 +443,11 @@ export class LifecycleService {
         if (operation.phase !== "snapshot_removed") {
             if (current.record.inventoryRevision !== null) {
                 const removed = this.snapshots.remove(snapshotId(current.record.id, current.record.inventoryRevision));
+                if (!removed.ok)
+                    return removed;
+            }
+            if (current.record.inventoryFallbackRevision !== null) {
+                const removed = this.snapshots.remove(snapshotId(current.record.id, current.record.inventoryFallbackRevision));
                 if (!removed.ok)
                     return removed;
             }
@@ -506,9 +546,19 @@ export class LifecycleService {
             selectedSlot: runtimeState.selectedSlot,
             totalExperience: runtimeState.totalExperience,
             inventoryRevision: snapshotRevision,
+            inventoryFallbackRevision: null,
         };
         const committed = commitCatalogRecord(this.stateStore, current.catalogRevision, current.catalog, finalRecord);
-        return committed.ok ? ok(committed.value.record) : committed;
+        if (!committed.ok)
+            return committed;
+        for (const revision of [context.record.inventoryRevision, context.record.inventoryFallbackRevision]) {
+            if (revision === null)
+                continue;
+            const removed = this.snapshots.remove(snapshotId(context.record.id, revision));
+            if (!removed.ok)
+                return removed;
+        }
+        return ok(committed.value.record);
     }
     loadRecord(id, expectedRecordRevision) {
         const loaded = this.stateStore.loadCatalog();
@@ -547,6 +597,7 @@ function createProvisioningRecord(id, name, ownerId, request, skin, operation) {
         respawnMode: "manual",
         respawnLocation: null,
         inventoryRevision: null,
+        inventoryFallbackRevision: null,
         lastCheckpointTick: null,
         behavior: createDefaultBehaviorConfig(),
     };

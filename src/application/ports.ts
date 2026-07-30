@@ -135,17 +135,22 @@ export interface InventorySlotOverview {
 }
 
 export interface InventoryAccess {
+    readLiveOverview(fakePlayerId: FakePlayerId): Result<readonly InventorySlotOverview[]>;
     readSnapshotOverview(
         structureId: string,
         playerId: string,
     ): Result<readonly InventorySlotOverview[]>;
     prepareTransfer(transfer: InventoryTransfer): Result<void>;
     compareWithImages(transfer: InventoryTransfer): Result<InventoryImageState>;
+    compareFakeWithImages(transfer: InventoryTransfer): Result<InventoryImageState>;
     applyBeforeImage(transfer: InventoryTransfer): Result<void>;
     applyAfterImage(transfer: InventoryTransfer): Result<void>;
+    applyFakeAfterImage(transfer: InventoryTransfer): Result<void>;
     removeTransferImages(transfer: InventoryTransfer): Result<void>;
     getPlayerExperience(playerId: string): Result<number>;
     setPlayerExperience(playerId: string, totalExperience: number): Result<void>;
+    getFakePlayerExperience(fakePlayerId: FakePlayerId): Result<number>;
+    setFakePlayerExperience(fakePlayerId: FakePlayerId, totalExperience: number): Result<void>;
     compareExperience(transfer: ExperienceTransfer): Result<InventoryImageState>;
 }
 

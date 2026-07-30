@@ -23,7 +23,7 @@ flowchart LR
 | 服务 | 唯一职责 |
 |---|---|
 | `LifecycleService` | 创建、上下线、重命名、删除、复活及稳定 record revision |
-| `InventoryService` | 检查点、41 槽快照、物品/经验事务、pending 恢复和只读概览 |
+| `InventoryService` | 在线活体/离线快照概览、检查点、41 槽物品/经验事务和 pending 恢复 |
 | `BehaviorService` | 即时动作、自动行为配置、公平调度和全局方块读取预算 |
 
 三个服务共享 `OperationCoordinator`。写用例按排序后的 `fake:<id>` 和 `player:<playfabId>` 获取 lease；表单等待期间不持有 lease，提交时重新鉴权并检查 record revision。
@@ -34,7 +34,7 @@ flowchart LR
 |---|---|
 | `WorldStateStore` | catalog、permissions、operations 三聚合的版本化读写 |
 | `InventorySnapshotStore` | 完整 41 槽结构快照及临时工作区恢复 |
-| `InventoryAccess` | 真实玩家/假人槽位和经验事务，以及纯 DTO 概览 |
+| `InventoryAccess` | 真人与在线假人的槽位、经验、before/after 比较和纯 DTO 概览 |
 | `FakePlayerRuntime` | 生成、皮肤、重绑定、断开、复活和真实动作 |
 | `WorldQueries` | 区块、方块、距离、视线、玩家和实体查询 |
 
@@ -69,7 +69,7 @@ application 端口只接收稳定 ID、自有坐标、结构 ID、逻辑槽位�
 
 所有恢复函数必须幂等。未知 SAPI 异常在边界添加操作和稳定 ID 上下文后继续抛出，由命令、Forms、启动恢复或 tick 边界统一记录。
 
-在线库存变更标记为 dirty 后优先建立检查点；无变化记录每 1,200 tick 最多检查一次，世界 tick 回退时只重建一次时间基准。Forms 在 `show()` 返回后重新获取授权和当前 record revision，不能提交打开表单前缓存的 revision。
+稳定 `online` 和 `offline` 记录都可进入背包管理。在线概览直接读取活体 41 槽；在线写操作先建立即时检查点，再复用与离线操作相同的可恢复事务，并将已验证的 after image 写回活体。在线库存变更标记为 dirty 后优先建立检查点；无变化记录每 1,200 tick 最多检查一次，世界 tick 回退时只重建一次时间基准。Forms 在 `show()` 返回后重新获取授权和当前 record revision，不能提交打开表单前缓存的 revision。
 
 ## 41 槽快照
 
@@ -97,10 +97,12 @@ prepared -> staged -> applying -> committed -> checkpointed
 - `prepared` 固定假人 ID/revision、真人 PlayFab ID、请求和 before/after 结构 ID。
 - `staged` 表示完整 before 与 expected after image 均已保存并验证。
 - `applying` 只在当前真实状态完整等于 before 时写 after；每次写后逐槽回读。
+- online 事务把真人和活体假人都视为参与者；假人当前状态必须完整等于 before 或 after，写入 after 后必须逐槽或按绝对经验值回读验证。
 - 当前状态完整等于 after 时直接继续提交，不能重复移动物品。
 - mixed/conflict 绝不自动覆盖；事务和两份 image 保留供 OP 诊断和沿同一状态机重试。
 - `committed` 先让 catalog 指向新的假人快照。
 - `checkpointed` 后才可清理旧快照和事务 image。
+- 任一物品或经验事务 pending 时，该假人的周期检查点与自动行为都不参与调度。
 
 经验事务保存双方 before 总经验和转移量，以绝对总经验比较并恢复；`addExperience` 按 SAPI 单次上限 16,777,216 分块调用。当前值既非 before 也非 after 时进入 conflict，不能重复累加猜测。
 
@@ -110,13 +112,14 @@ prepared -> staged -> applying -> committed -> checkpointed
 
 1. 加载并校验 catalog、permissions、operations。
 2. 恢复结构临时工作区。
-3. 恢复 pending 物品和经验事务。
-4. 重新加载 catalog/operations，并验证每个残留事务仍指向存在且 `offline` 的假人。
-5. 扫描 `xiaobo_fp_<id>` 标签并重绑定运行时句柄；孤立或重复稳定 ID 阻塞恢复。
-6. 按稳定 ID 顺序恢复生命周期中间状态和期望在线记录。
-7. 成功后启动检查点和自动行为调度。
+3. 扫描 `xiaobo_fp_<id>` 标签并重绑定运行时句柄；孤立或重复稳定 ID 阻塞恢复。
+4. 对存在 pending 事务的 `online` 记录确认活体仍在；实体缺失时按 catalog 权威快照重建并恢复。
+5. 恢复 pending 物品和经验事务。
+6. 重新加载 catalog/operations，并验证每个残留事务仍指向存在的 `offline` 假人，或有存活实例的 `online` 假人。
+7. 按稳定 ID 顺序恢复生命周期中间状态和期望在线记录。
+8. 成功后启动检查点和自动行为调度。
 
-`mixed/conflict` 可以作为可诊断 pending 保留，但对应假人必须保持 offline。否则继续生命周期恢复可能让同一库存同时被事务和在线实体修改，所以系统会阻止 ready。
+`mixed/conflict` 可以作为可诊断 pending 保留。对应假人必须保持 `offline`，或保持具有存活实例的 `online`；后者在 pending 清除前暂停周期检查点和自动行为。其他生命周期组合会阻止 ready。
 
 ## 能力门控
 

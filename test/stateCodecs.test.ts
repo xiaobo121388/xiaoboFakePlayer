@@ -41,6 +41,38 @@ test("aggregate codecs reject malformed and unknown-schema payloads", () => {
     }), undefined);
 });
 
+test("operations codec preserves every recoverable inventory request", () => {
+    const requests = [
+        { kind: "recycle_all" },
+        { kind: "swap_inventory" },
+        { kind: "swap_equipment" },
+        { kind: "swap", fakeSlot: 40, playerSlot: 40 },
+        { kind: "take", fakeSlot: 40, playerSlot: 35 },
+        { kind: "put", fakeSlot: 40, playerSlot: 35 },
+        { kind: "swap_fake", firstSlot: 0, secondSlot: 40 },
+    ] as const;
+    for (const request of requests) {
+        const transfer = {
+            id: "fp0001:inventory:4",
+            fakePlayerId: "fp0001",
+            playerId: "owner",
+            fakePlayerRevision: 4,
+            fakeSnapshotId: "xiaobo:fp0001_inv_1",
+            fakeAfterSnapshotId: "xiaobo:fp0001_inv_2",
+            request,
+            beforeStructureId: "before",
+            afterStructureId: "after",
+            phase: "prepared",
+        };
+        const decoded = operationsCodec.decode(2, {
+            workspace: {},
+            inventoryTransfers: { [transfer.id]: transfer },
+            experienceTransfers: {},
+        });
+        assert.deepEqual(decoded?.inventoryTransfers[transfer.id]?.request, request);
+    }
+});
+
 test("world state aggregates commit with independent revisions", () => {
     const store = new BankedWorldStateStore(new MemoryBackend(), "test");
 

@@ -151,8 +151,17 @@ export class BehaviorService {
         const loaded = this.stateStore.loadCatalog();
         if (!loaded.ok)
             return err("CONFLICT", loaded.diagnostics.join("; "));
+        const operations = this.stateStore.loadOperations();
+        if (!operations.ok)
+            return err("CONFLICT", operations.diagnostics.join("; "));
+        const pendingIds = new Set([
+            ...Object.values(operations.state.value.inventoryTransfers).map((transfer) => transfer.fakePlayerId),
+            ...Object.values(operations.state.value.experienceTransfers).map((transfer) => transfer.fakePlayerId),
+        ]);
         const tasks = Object.values(loaded.state.value.records)
-            .filter((record) => record.lifecycle.kind === "online" && this.runtime.get(record.id)?.alive === true)
+            .filter((record) => (record.lifecycle.kind === "online"
+            && this.runtime.get(record.id)?.alive === true
+            && !pendingIds.has(record.id)))
             .sort((left, right) => left.id.localeCompare(right.id))
             .flatMap((record) => AUTOMATIC_BEHAVIORS
             .filter((kind) => record.behavior[kind].enabled)

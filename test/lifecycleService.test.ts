@@ -143,6 +143,10 @@ class MemorySnapshots implements InventorySnapshotStore {
 }
 
 class MemoryInventoryAccess implements InventoryAccess {
+    public readLiveOverview() {
+        return ok([]);
+    }
+
     public readonly states = new Map<string, InventoryImageState>();
     public readonly playerExperience = new Map<string, number>();
 
@@ -162,6 +166,10 @@ class MemoryInventoryAccess implements InventoryAccess {
         return ok(this.states.get(transfer.id) ?? "before");
     }
 
+    public compareFakeWithImages(transfer: InventoryTransfer): Result<InventoryImageState> {
+        return ok(this.states.get(`fake:${transfer.id}`) ?? "before");
+    }
+
     public applyBeforeImage(transfer: InventoryTransfer): Result<void> {
         this.states.set(transfer.id, "before");
         return ok(undefined);
@@ -169,6 +177,11 @@ class MemoryInventoryAccess implements InventoryAccess {
 
     public applyAfterImage(transfer: InventoryTransfer): Result<void> {
         this.states.set(transfer.id, "after");
+        return ok(undefined);
+    }
+
+    public applyFakeAfterImage(transfer: InventoryTransfer): Result<void> {
+        this.states.set(`fake:${transfer.id}`, "after");
         return ok(undefined);
     }
 
@@ -182,6 +195,15 @@ class MemoryInventoryAccess implements InventoryAccess {
 
     public setPlayerExperience(playerId: string, totalExperience: number): Result<void> {
         this.playerExperience.set(playerId, totalExperience);
+        return ok(undefined);
+    }
+
+    public getFakePlayerExperience(fakePlayerId: FakePlayerId): Result<number> {
+        return ok(this.playerExperience.get(`fake:${fakePlayerId}`) ?? 0);
+    }
+
+    public setFakePlayerExperience(fakePlayerId: FakePlayerId, totalExperience: number): Result<void> {
+        this.playerExperience.set(`fake:${fakePlayerId}`, totalExperience);
         return ok(undefined);
     }
 
@@ -666,7 +688,7 @@ test("recovery checkpoints a respawned inventory once without restoring the old 
     assert.equal(fixture.snapshots.restoreCount, restoresBefore);
 });
 
-test("recovery blocks a remaining transfer whose fake player is not offline", () => {
+test("recovery preserves a conflicting transfer while its fake player remains online", () => {
     const fixture = createFixture();
     const created = fixture.service.create(operator, createRequest);
     assert.equal(created.ok, true);
@@ -701,9 +723,129 @@ test("recovery blocks a remaining transfer whose fake player is not offline", ()
     );
     const result = recovery.run();
 
-    assert.equal(result.ok, false);
-    if (!result.ok) assert.match(result.error.message, /保持 offline/);
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.match(result.value.diagnostics.join("; "), /mixed/);
     const remaining = fixture.state.loadOperations();
     assert.equal(remaining.ok, true);
     if (remaining.ok) assert.equal(remaining.state.value.inventoryTransfers[transfer.id]?.phase, "applying");
+});
+
+test("recovery rebuilds a missing online fake player before preserving its conflicting transfer", () => {
+    const fixture = createFixture();
+    const created = fixture.service.create(operator, createRequest);
+    assert.equal(created.ok, true);
+    if (!created.ok) return;
+    const checkpoint = fixture.inventory.checkpoint(created.value.id, created.value.recordRevision, 10);
+    assert.equal(checkpoint.ok, true);
+    if (!checkpoint.ok) return;
+    const transfer: InventoryTransfer = {
+        id: `${checkpoint.value.record.id}:inventory:${checkpoint.value.record.recordRevision}`,
+        fakePlayerId: checkpoint.value.record.id,
+        playerId: operator.playerId,
+        fakePlayerRevision: checkpoint.value.record.recordRevision,
+        fakeSnapshotId: checkpoint.value.structureId,
+        fakeAfterSnapshotId: snapshotId(checkpoint.value.record.id, 2),
+        request: { kind: "recycle_all" },
+        beforeStructureId: "before",
+        afterStructureId: "after",
+        phase: "applying",
+    };
+    const operations = fixture.state.loadOperations();
+    assert.equal(operations.ok, true);
+    if (!operations.ok) return;
+    assert.equal(fixture.state.commitOperations(operations.state.revision, {
+        ...operations.state.value,
+        inventoryTransfers: { [transfer.id]: transfer },
+    }).ok, true);
+    fixture.inventoryAccess.states.set(transfer.id, "mixed");
+    fixture.runtime.players.delete(created.value.id);
+
+    const recovery = new RecoveryRunner(
+        fixture.state,
+        fixture.runtime,
+        fixture.snapshots,
+        fixture.coordinator,
+        fixture.inventory,
+    );
+    const restoresBefore = fixture.snapshots.restoreCount;
+    const result = recovery.run();
+
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.equal(fixture.runtime.get(created.value.id)?.alive, true);
+    assert.equal(fixture.snapshots.restoreCount, restoresBefore + 1);
+    assert.match(result.value.diagnostics.join("; "), /mixed/);
+});
+
+test("recovery rebuilds a missing online fake player from a committed after snapshot", () => {
+    const fixture = createFixture();
+    const created = fixture.service.create(operator, createRequest);
+    assert.equal(created.ok, true);
+    if (!created.ok) return;
+    const checkpoint = fixture.inventory.checkpoint(created.value.id, created.value.recordRevision, 10);
+    assert.equal(checkpoint.ok, true);
+    if (!checkpoint.ok) return;
+    const transfer: InventoryTransfer = {
+        id: `${checkpoint.value.record.id}:inventory:${checkpoint.value.record.recordRevision}`,
+        fakePlayerId: checkpoint.value.record.id,
+        playerId: operator.playerId,
+        fakePlayerRevision: checkpoint.value.record.recordRevision,
+        fakeSnapshotId: checkpoint.value.structureId,
+        fakeAfterSnapshotId: snapshotId(checkpoint.value.record.id, 2),
+        request: { kind: "recycle_all" },
+        beforeStructureId: "before",
+        afterStructureId: "after",
+        phase: "committed",
+    };
+    fixture.snapshots.saved.add(transfer.fakeAfterSnapshotId);
+    const catalog = fixture.state.loadCatalog();
+    assert.equal(catalog.ok, true);
+    if (!catalog.ok) return;
+    const committedRecord = {
+        ...checkpoint.value.record,
+        recordRevision: checkpoint.value.record.recordRevision + 1,
+        inventoryRevision: 2,
+    };
+    assert.equal(fixture.state.commitCatalog(catalog.state.revision, {
+        ...catalog.state.value,
+        records: { ...catalog.state.value.records, [committedRecord.id]: committedRecord },
+    }).ok, true);
+    const operations = fixture.state.loadOperations();
+    assert.equal(operations.ok, true);
+    if (!operations.ok) return;
+    assert.equal(fixture.state.commitOperations(operations.state.revision, {
+        ...operations.state.value,
+        inventoryTransfers: { [transfer.id]: transfer },
+    }).ok, true);
+    fixture.inventoryAccess.states.set(transfer.id, "after");
+    fixture.inventoryAccess.states.set(`fake:${transfer.id}`, "after");
+    fixture.runtime.players.delete(created.value.id);
+
+    const recovery = new RecoveryRunner(
+        fixture.state,
+        fixture.runtime,
+        fixture.snapshots,
+        fixture.coordinator,
+        fixture.inventory,
+    );
+    const restoresBefore = fixture.snapshots.restoreCount;
+    const result = recovery.run();
+
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.equal(result.value.recoveredTransfers, 1);
+    assert.equal(fixture.runtime.get(created.value.id)?.alive, true);
+    assert.equal(fixture.snapshots.restoreCount, restoresBefore + 1);
+    assert.equal(fixture.snapshots.has(transfer.fakeSnapshotId), false);
+    assert.equal(fixture.snapshots.has(transfer.fakeAfterSnapshotId), true);
+    const remaining = fixture.state.loadOperations();
+    assert.equal(remaining.ok, true);
+    if (remaining.ok) assert.deepEqual(remaining.state.value.inventoryTransfers, {});
+    const recoveredCatalog = fixture.state.loadCatalog();
+    assert.equal(recoveredCatalog.ok, true);
+    if (recoveredCatalog.ok) {
+        assert.equal(recoveredCatalog.state.value.records[created.value.id]?.recordRevision, 4);
+        assert.equal(recoveredCatalog.state.value.records[created.value.id]?.inventoryRevision, 2);
+    }
 });

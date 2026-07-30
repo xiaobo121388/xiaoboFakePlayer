@@ -456,6 +456,50 @@ test("automatic follow and attack share a fair per-player action slot and honor 
     assert.equal(fixture.runtime.actions.at(-1)?.kind, "navigate_entity");
 });
 
+test("automatic behaviors pause while a transfer is pending", () => {
+    const fixture = createFixture();
+    const operator = { playerId: "operator", isOperator: true };
+    const config = {
+        ...createDefaultBehaviorConfig(),
+        use: { enabled: true, intervalTicks: 1, slot: 0 },
+    };
+    assert.equal(fixture.service.updateBehaviorConfig(
+        operator,
+        fixture.record.id,
+        fixture.record.recordRevision,
+        fixture.record.behavior,
+        config,
+    ).ok, true);
+    fixture.runtime.actions.length = 0;
+    const operations = fixture.state.loadOperations();
+    assert.equal(operations.ok, true);
+    if (!operations.ok) throw new Error("operations unavailable");
+    const transfer = {
+        id: "fp0001:inventory:5",
+        fakePlayerId: fixture.record.id,
+        playerId: "owner",
+        fakePlayerRevision: 5,
+        fakeSnapshotId: "before-fake",
+        fakeAfterSnapshotId: "after-fake",
+        request: { kind: "swap_inventory" as const },
+        beforeStructureId: "before-player",
+        afterStructureId: "after-player",
+        phase: "prepared" as const,
+    };
+    assert.equal(fixture.state.commitOperations(operations.state.revision, {
+        ...operations.state.value,
+        inventoryTransfers: { [transfer.id]: transfer },
+    }).ok, true);
+
+    assert.deepEqual(fixture.service.tick(0), ok({
+        consideredTasks: 0,
+        attemptedActions: 0,
+        acceptedActions: 0,
+        blockReads: 0,
+    }));
+    assert.deepEqual(fixture.runtime.actions, []);
+});
+
 test("automatic mine search consumes at most 256 unique block reads per tick and resumes", () => {
     const fixture = createFixture();
     const operator = { playerId: "operator", isOperator: true };

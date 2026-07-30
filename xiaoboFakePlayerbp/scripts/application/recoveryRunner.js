@@ -28,6 +28,15 @@ export class RecoveryRunner {
         const workspaceRecovery = this.snapshots.recoverWorkspaces();
         if (!workspaceRecovery.ok)
             return workspaceRecovery;
+        const tagged = this.runtime.listTagged();
+        for (const player of tagged) {
+            if (initialCatalog.state.value.records[player.id] === undefined) {
+                return err("CONFLICT", `发现没有 catalog 记录的稳定标签实体 ${player.id}。`);
+            }
+        }
+        const pendingRuntime = this.restorePendingOnlineRuntimes(initialCatalog.state.value, operations.state.value);
+        if (!pendingRuntime.ok)
+            return pendingRuntime;
         const transferRecovery = this.inventory.recoverPendingTransfers();
         if (!transferRecovery.ok)
             return transferRecovery;
@@ -37,15 +46,9 @@ export class RecoveryRunner {
         const remainingOperations = this.stateStore.loadOperations();
         if (!remainingOperations.ok)
             return err("CONFLICT", remainingOperations.diagnostics.join("; "));
-        const pendingInvariant = validatePendingTransferRecords(catalog.state.value, remainingOperations.state.value);
+        const pendingInvariant = validatePendingTransferRecords(catalog.state.value, remainingOperations.state.value, this.runtime);
         if (!pendingInvariant.ok)
             return pendingInvariant;
-        const tagged = this.runtime.listTagged();
-        for (const player of tagged) {
-            if (catalog.state.value.records[player.id] === undefined) {
-                return err("CONFLICT", `发现没有 catalog 记录的稳定标签实体 ${player.id}。`);
-            }
-        }
         let recoveredRecords = 0;
         const diagnostics = [
             ...catalog.state.diagnostics,
@@ -68,6 +71,30 @@ export class RecoveryRunner {
             reboundEntities: tagged.length,
             diagnostics,
         });
+    }
+    restorePendingOnlineRuntimes(catalog, operations) {
+        const ids = new Set([
+            ...Object.values(operations.inventoryTransfers).map((transfer) => transfer.fakePlayerId),
+            ...Object.values(operations.experienceTransfers).map((transfer) => transfer.fakePlayerId),
+        ]);
+        for (const id of [...ids].sort()) {
+            const record = catalog.records[id];
+            if (record === undefined || record.lifecycle.kind !== "online")
+                continue;
+            const existing = this.runtime.get(id);
+            if (existing !== undefined) {
+                if (!existing.alive)
+                    return err("INVALID_STATE", `待恢复事务的在线假人 ${id} 当前未存活。`);
+                continue;
+            }
+            this.runtime.spawn(spawnRequest(record));
+            if (record.inventoryRevision === null)
+                continue;
+            const restored = this.snapshots.restore(id, snapshotId(id, record.inventoryRevision));
+            if (!restored.ok)
+                return restored;
+        }
+        return ok(undefined);
     }
     recoverRecord(id) {
         const lease = this.coordinator.tryAcquire([`fake:${id}`]);
@@ -329,7 +356,7 @@ export class RecoveryRunner {
         return committed.ok ? ok("completed respawning") : committed;
     }
 }
-function validatePendingTransferRecords(catalog, operations) {
+function validatePendingTransferRecords(catalog, operations, runtime) {
     const transfers = [
         ...Object.values(operations.inventoryTransfers),
         ...Object.values(operations.experienceTransfers),
@@ -339,8 +366,10 @@ function validatePendingTransferRecords(catalog, operations) {
         if (record === undefined) {
             return err("CONFLICT", `待恢复事务 ${transfer.id} 指向不存在的假人 ${transfer.fakePlayerId}。`);
         }
+        if (record.lifecycle.kind === "online" && runtime.get(record.id)?.alive === true)
+            continue;
         if (record.lifecycle.kind !== "offline") {
-            return err("CONFLICT", `待恢复事务 ${transfer.id} 要求假人 ${record.id} 保持 offline，实际为 ${record.lifecycle.kind}。`);
+            return err("CONFLICT", `待恢复事务 ${transfer.id} 要求假人 ${record.id} 保持 offline，或保持有存活实例的 online 状态；实际为 ${record.lifecycle.kind}。`);
         }
     }
     return ok(undefined);

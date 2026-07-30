@@ -146,8 +146,6 @@ async function openDetailForm(player: Player, services: CommandServices, record:
             actions.push(() => openRenameForm(player, services, record));
             form.button(t("xiaobo.fp.form.detail.respawn"));
             actions.push(() => openRespawnRuleForm(player, services, record));
-        }
-        if (record.lifecycle.kind === "offline") {
             form.button(t("xiaobo.fp.form.detail.inventory"));
             actions.push(() => openInventoryForm(
                 player,
@@ -155,6 +153,8 @@ async function openDetailForm(player: Player, services: CommandServices, record:
                 record,
                 (updated) => openDetailForm(player, services, updated),
             ));
+        }
+        if (record.lifecycle.kind === "offline") {
             form.button(t("xiaobo.fp.form.detail.recycle_delete"));
             actions.push(() => confirmRecycleDelete(player, services, record));
             form.button(t("xiaobo.fp.form.detail.purge"));

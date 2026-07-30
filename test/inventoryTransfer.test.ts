@@ -98,11 +98,16 @@ class MemorySnapshots implements InventorySnapshotStore {
 
 class MemoryInventoryAccess implements InventoryAccess {
     public readonly states = new Map<string, InventoryImageState>();
+    public readonly fakeStates = new Map<string, InventoryImageState>();
     public readonly playerExperience = new Map<string, number>();
+    public readonly fakePlayerExperience = new Map<string, number>();
     public readonly preparedRequests: InventoryTransfer["request"][] = [];
     public overviewReadCount = 0;
+    public liveOverviewReadCount = 0;
     public applyAfterCount = 0;
+    public applyFakeAfterCount = 0;
     public experienceWriteCount = 0;
+    public fakeExperienceWriteCount = 0;
 
     public constructor(private readonly snapshots: MemorySnapshots) {}
 
@@ -132,15 +137,28 @@ class MemoryInventoryAccess implements InventoryAccess {
         })));
     }
 
+    public readLiveOverview(): Result<readonly {
+        readonly slot: number;
+        readonly item: null;
+    }[]> {
+        this.liveOverviewReadCount += 1;
+        return ok(Array.from({ length: 41 }, (_, slot) => ({ slot, item: null })));
+    }
+
     public prepareTransfer(transfer: InventoryTransfer): Result<void> {
         this.preparedRequests.push(transfer.request);
         this.snapshots.ids.add(transfer.fakeAfterSnapshotId);
         this.states.set(transfer.id, "before");
+        this.fakeStates.set(transfer.id, "before");
         return ok(undefined);
     }
 
     public compareWithImages(transfer: InventoryTransfer): Result<InventoryImageState> {
         return ok(this.states.get(transfer.id) ?? "before");
+    }
+
+    public compareFakeWithImages(transfer: InventoryTransfer): Result<InventoryImageState> {
+        return ok(this.fakeStates.get(transfer.id) ?? "before");
     }
 
     public applyBeforeImage(transfer: InventoryTransfer): Result<void> {
@@ -151,6 +169,12 @@ class MemoryInventoryAccess implements InventoryAccess {
     public applyAfterImage(transfer: InventoryTransfer): Result<void> {
         this.applyAfterCount += 1;
         this.states.set(transfer.id, "after");
+        return ok(undefined);
+    }
+
+    public applyFakeAfterImage(transfer: InventoryTransfer): Result<void> {
+        this.applyFakeAfterCount += 1;
+        this.fakeStates.set(transfer.id, "after");
         return ok(undefined);
     }
 
@@ -168,6 +192,16 @@ class MemoryInventoryAccess implements InventoryAccess {
         return ok(undefined);
     }
 
+    public getFakePlayerExperience(fakePlayerId: FakePlayerId): Result<number> {
+        return ok(this.fakePlayerExperience.get(fakePlayerId) ?? 0);
+    }
+
+    public setFakePlayerExperience(fakePlayerId: FakePlayerId, totalExperience: number): Result<void> {
+        this.fakeExperienceWriteCount += 1;
+        this.fakePlayerExperience.set(fakePlayerId, totalExperience);
+        return ok(undefined);
+    }
+
     public compareExperience(transfer: ExperienceTransfer): Result<InventoryImageState> {
         const current = this.playerExperience.get(transfer.playerId) ?? 0;
         if (current === transfer.playerBefore) return ok("before");
@@ -176,7 +210,9 @@ class MemoryInventoryAccess implements InventoryAccess {
     }
 }
 
-class UnusedRuntime implements FakePlayerRuntime {
+class MemoryRuntime implements FakePlayerRuntime {
+    public current: RuntimeFakePlayer | undefined;
+
     public capturePlayerSkin() {
         return undefined;
     }
@@ -197,8 +233,8 @@ class UnusedRuntime implements FakePlayerRuntime {
         return { accepted: false };
     }
 
-    public get(): RuntimeFakePlayer | undefined {
-        return undefined;
+    public get(id: FakePlayerId): RuntimeFakePlayer | undefined {
+        return this.current?.id === id ? this.current : undefined;
     }
 
     public listTagged(): readonly RuntimeFakePlayer[] {
@@ -233,14 +269,15 @@ function createFixture() {
     const snapshots = new MemorySnapshots();
     snapshots.ids.add(snapshotId(record.id, 1));
     const access = new MemoryInventoryAccess(snapshots);
+    const runtime = new MemoryRuntime();
     const service = new InventoryService(
         state,
-        new UnusedRuntime(),
+        runtime,
         snapshots,
         new OperationCoordinator(),
         access,
     );
-    return { access, record, service, snapshots, state };
+    return { access, record, runtime, service, snapshots, state };
 }
 
 test("inventory transfer commits the after snapshot before removing the old authority", () => {
@@ -281,7 +318,7 @@ test("inventory overview reads the authoritative offline snapshot after revision
     assert.equal(fixture.access.overviewReadCount, 1);
 });
 
-test("inventory overview rejects stale or online records before reading a snapshot", () => {
+test("inventory overview rejects a stale record before reading an inventory", () => {
     const fixture = createFixture();
     const actor = { playerId: "owner", isOperator: true };
 
@@ -293,16 +330,133 @@ test("inventory overview rejects stale or online records before reading a snapsh
             message: "期望 revision 3，实际为 4。",
         },
     });
+    assert.equal(fixture.access.overviewReadCount, 0);
+    assert.equal(fixture.access.liveOverviewReadCount, 0);
+});
+
+test("inventory overview reads the live inventory while the fake player is online", () => {
+    const fixture = createFixture();
     fixture.state.catalog = {
         ...fixture.state.catalog,
         records: {
             [fixture.record.id]: { ...fixture.record, lifecycle: { kind: "online" } },
         },
     };
-    const online = fixture.service.getOverview(actor, fixture.record.id, fixture.record.recordRevision);
-    assert.equal(online.ok, false);
-    if (!online.ok) assert.equal(online.error.code, "INVALID_STATE");
+    fixture.runtime.current = {
+        id: fixture.record.id,
+        name: fixture.record.name,
+        dimension: fixture.record.location.dimension,
+        position: fixture.record.location.position,
+        rotation: fixture.record.location.rotation,
+        gameMode: fixture.record.gameMode,
+        selectedSlot: 3,
+        totalExperience: 27,
+        alive: true,
+    };
+
+    const online = fixture.service.getOverview(
+        { playerId: "owner", isOperator: true },
+        fixture.record.id,
+        fixture.record.recordRevision,
+    );
+
+    assert.equal(online.ok, true);
+    if (!online.ok) return;
+    assert.equal(online.value.selectedSlot, 3);
+    assert.equal(online.value.totalExperience, 27);
+    assert.equal(online.value.slots.length, 41);
+    assert.equal(fixture.access.liveOverviewReadCount, 1);
     assert.equal(fixture.access.overviewReadCount, 0);
+});
+
+test("online inventory transfer checkpoints and writes the after image to the live fake player", () => {
+    const fixture = createFixture();
+    fixture.state.catalog = {
+        ...fixture.state.catalog,
+        records: {
+            [fixture.record.id]: {
+                ...fixture.record,
+                lifecycle: { kind: "online" },
+                expectedOnline: true,
+            },
+        },
+    };
+    fixture.runtime.current = {
+        id: fixture.record.id,
+        name: fixture.record.name,
+        dimension: fixture.record.location.dimension,
+        position: fixture.record.location.position,
+        rotation: fixture.record.location.rotation,
+        gameMode: fixture.record.gameMode,
+        selectedSlot: fixture.record.selectedSlot,
+        totalExperience: fixture.record.totalExperience,
+        alive: true,
+    };
+
+    const result = fixture.service.transferItems(
+        { playerId: "owner", isOperator: true },
+        fixture.record.id,
+        fixture.record.recordRevision,
+        { kind: "swap", fakeSlot: 0, playerSlot: 0 },
+    );
+
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.equal(result.value.lifecycle.kind, "online");
+    assert.equal(result.value.recordRevision, 6);
+    assert.equal(result.value.inventoryRevision, 3);
+    assert.equal(fixture.access.applyAfterCount, 1);
+    assert.equal(fixture.access.applyFakeAfterCount, 1);
+    assert.equal(fixture.snapshots.has(snapshotId(fixture.record.id, 1)), false);
+    assert.equal(fixture.snapshots.has(snapshotId(fixture.record.id, 2)), false);
+    assert.equal(fixture.snapshots.has(snapshotId(fixture.record.id, 3)), true);
+    assert.deepEqual(fixture.state.operations.inventoryTransfers, {});
+});
+
+test("online experience transfer updates the live fake player and catalog exactly once", () => {
+    const fixture = createFixture();
+    fixture.state.catalog = {
+        ...fixture.state.catalog,
+        records: {
+            [fixture.record.id]: {
+                ...fixture.record,
+                lifecycle: { kind: "online" },
+                expectedOnline: true,
+            },
+        },
+    };
+    fixture.runtime.current = {
+        id: fixture.record.id,
+        name: fixture.record.name,
+        dimension: fixture.record.location.dimension,
+        position: fixture.record.location.position,
+        rotation: fixture.record.location.rotation,
+        gameMode: fixture.record.gameMode,
+        selectedSlot: fixture.record.selectedSlot,
+        totalExperience: fixture.record.totalExperience,
+        alive: true,
+    };
+    fixture.access.playerExperience.set("owner", 5);
+    fixture.access.fakePlayerExperience.set(fixture.record.id, fixture.record.totalExperience);
+
+    const result = fixture.service.transferExperience(
+        { playerId: "owner", isOperator: true },
+        fixture.record.id,
+        fixture.record.recordRevision,
+        7,
+    );
+
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.equal(result.value.lifecycle.kind, "online");
+    assert.equal(result.value.recordRevision, 6);
+    assert.equal(result.value.inventoryRevision, 2);
+    assert.equal(result.value.totalExperience, 13);
+    assert.equal(fixture.access.playerExperience.get("owner"), 12);
+    assert.equal(fixture.access.fakePlayerExperience.get(fixture.record.id), 13);
+    assert.equal(fixture.access.experienceWriteCount, 1);
+    assert.equal(fixture.access.fakeExperienceWriteCount, 1);
+    assert.deepEqual(fixture.state.operations.experienceTransfers, {});
 });
 
 test("inventory transfer rejects invalid slots before creating a pending operation", () => {
@@ -418,6 +572,61 @@ test("recovery completes an applying transfer whose player and catalog already m
     assert.deepEqual(fixture.state.operations.inventoryTransfers, {});
 });
 
+test("online recovery only applies the missing fake-player after image", () => {
+    const fixture = createFixture();
+    const transfer: InventoryTransfer = {
+        ...inventoryTransfer("applying"),
+        id: "fp0001:inventory:5",
+        fakePlayerRevision: 5,
+        fakeSnapshotId: snapshotId(fixture.record.id, 2),
+        fakeAfterSnapshotId: snapshotId(fixture.record.id, 3),
+    };
+    const onlineRecord: FakePlayerRecord = {
+        ...fixture.record,
+        recordRevision: 5,
+        lifecycle: { kind: "online" },
+        expectedOnline: true,
+        inventoryRevision: 2,
+    };
+    fixture.state.catalog = {
+        ...fixture.state.catalog,
+        records: { [fixture.record.id]: onlineRecord },
+    };
+    fixture.state.operations = {
+        ...fixture.state.operations,
+        inventoryTransfers: { [transfer.id]: transfer },
+    };
+    fixture.snapshots.ids.delete(snapshotId(fixture.record.id, 1));
+    fixture.snapshots.ids.add(transfer.fakeSnapshotId);
+    fixture.snapshots.ids.add(transfer.fakeAfterSnapshotId);
+    fixture.runtime.current = {
+        id: onlineRecord.id,
+        name: onlineRecord.name,
+        dimension: onlineRecord.location.dimension,
+        position: onlineRecord.location.position,
+        rotation: onlineRecord.location.rotation,
+        gameMode: onlineRecord.gameMode,
+        selectedSlot: onlineRecord.selectedSlot,
+        totalExperience: onlineRecord.totalExperience,
+        alive: true,
+    };
+    fixture.access.states.set(transfer.id, "after");
+    fixture.access.fakeStates.set(transfer.id, "before");
+
+    const result = fixture.service.recoverPendingTransfers();
+
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.equal(result.value.recovered, 1);
+    assert.equal(fixture.access.applyAfterCount, 0);
+    assert.equal(fixture.access.applyFakeAfterCount, 1);
+    assert.equal(fixture.state.catalog.records[fixture.record.id]?.recordRevision, 6);
+    assert.equal(fixture.state.catalog.records[fixture.record.id]?.inventoryRevision, 3);
+    assert.equal(fixture.snapshots.has(transfer.fakeSnapshotId), false);
+    assert.equal(fixture.snapshots.has(transfer.fakeAfterSnapshotId), true);
+    assert.deepEqual(fixture.state.operations.inventoryTransfers, {});
+});
+
 test("mixed inventory recovery remains pending without changing catalog or snapshots", () => {
     const fixture = createFixture();
     const transfer = inventoryTransfer("applying");
@@ -504,6 +713,60 @@ test("experience recovery does not add experience twice after player and catalog
     if (!result.ok) return;
     assert.equal(result.value.recovered, 1);
     assert.equal(fixture.access.experienceWriteCount, 0);
+    assert.equal(fixture.state.catalog.records[fixture.record.id]?.totalExperience, 13);
+    assert.deepEqual(fixture.state.operations.experienceTransfers, {});
+});
+
+test("online experience recovery does not write either after value twice", () => {
+    const fixture = createFixture();
+    const transfer: ExperienceTransfer = {
+        id: "fp0001:experience:5",
+        fakePlayerId: fixture.record.id,
+        playerId: "owner",
+        fakePlayerRevision: 5,
+        kind: "fake_to_player",
+        fakePlayerBefore: 20,
+        playerBefore: 10,
+        amount: 7,
+        phase: "applying",
+    };
+    const onlineRecord: FakePlayerRecord = {
+        ...fixture.record,
+        recordRevision: 5,
+        lifecycle: { kind: "online" },
+        expectedOnline: true,
+        inventoryRevision: 2,
+    };
+    fixture.state.catalog = {
+        ...fixture.state.catalog,
+        records: { [fixture.record.id]: onlineRecord },
+    };
+    fixture.state.operations = {
+        ...fixture.state.operations,
+        experienceTransfers: { [transfer.id]: transfer },
+    };
+    fixture.runtime.current = {
+        id: onlineRecord.id,
+        name: onlineRecord.name,
+        dimension: onlineRecord.location.dimension,
+        position: onlineRecord.location.position,
+        rotation: onlineRecord.location.rotation,
+        gameMode: onlineRecord.gameMode,
+        selectedSlot: onlineRecord.selectedSlot,
+        totalExperience: 13,
+        alive: true,
+    };
+    fixture.access.playerExperience.set(transfer.playerId, 17);
+    fixture.access.fakePlayerExperience.set(transfer.fakePlayerId, 13);
+
+    const result = fixture.service.recoverPendingTransfers();
+
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.equal(result.value.recovered, 1);
+    assert.equal(fixture.access.experienceWriteCount, 0);
+    assert.equal(fixture.access.fakeExperienceWriteCount, 0);
+    assert.equal(fixture.state.catalog.records[fixture.record.id]?.recordRevision, 6);
     assert.equal(fixture.state.catalog.records[fixture.record.id]?.totalExperience, 13);
     assert.deepEqual(fixture.state.operations.experienceTransfers, {});
 });

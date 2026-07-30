@@ -6,20 +6,24 @@ const PLAYER_INVENTORY_SLOT_COUNT = 36;
 const MAX_EXPERIENCE_CHANGE = 16_777_216;
 export class SapiInventoryAccess {
     snapshots;
-    constructor(snapshots) {
+    runtime;
+    constructor(snapshots, runtime) {
         this.snapshots = snapshots;
+        this.runtime = runtime;
+    }
+    readLiveOverview(fakePlayerId) {
+        const player = this.runtime.getHandle(fakePlayerId);
+        if (player === undefined)
+            return err("INVALID_STATE", `假人 ${fakePlayerId} 没有在线运行时实例。`);
+        const image = readPlayerImage(player);
+        return image.ok ? ok(toOverview(image.value)) : image;
     }
     readSnapshotOverview(structureId, playerId) {
         const player = this.findPlayer(playerId);
         if (!player.ok)
             return player;
         const image = this.snapshots.loadImage(structureId, player.value.dimension, player.value.location);
-        return image.ok
-            ? ok(image.value.map((item, slot) => ({
-                slot,
-                item: item === undefined ? null : itemOverview(item),
-            })))
-            : image;
+        return image.ok ? ok(toOverview(image.value)) : image;
     }
     prepareTransfer(transfer) {
         const player = this.findPlayer(transfer.playerId);
@@ -52,11 +56,26 @@ export class SapiInventoryAccess {
             ? ok(classifyImage(current.value, context.value.before, context.value.after))
             : current;
     }
+    compareFakeWithImages(transfer) {
+        const context = this.loadFakePlayerImages(transfer);
+        if (!context.ok)
+            return context;
+        const current = readPlayerImage(context.value.player);
+        return current.ok
+            ? ok(classifyImage(current.value, context.value.before, context.value.after))
+            : current;
+    }
     applyBeforeImage(transfer) {
         return this.applyImage(transfer, "before");
     }
     applyAfterImage(transfer) {
         return this.applyImage(transfer, "after");
+    }
+    applyFakeAfterImage(transfer) {
+        const context = this.loadFakePlayerImages(transfer);
+        if (!context.ok)
+            return context;
+        return applyVerifiedImage(context.value.player, context.value.before, context.value.after, transfer.id, "after");
     }
     removeTransferImages(transfer) {
         const before = this.snapshots.remove(transfer.beforeStructureId);
@@ -69,22 +88,20 @@ export class SapiInventoryAccess {
         return player.ok ? ok(player.value.getTotalXp()) : player;
     }
     setPlayerExperience(playerId, totalExperience) {
-        if (!Number.isSafeInteger(totalExperience) || totalExperience < 0) {
-            return err("INVALID_STATE", "玩家总经验必须是非负安全整数。");
-        }
         const player = this.findPlayer(playerId);
         if (!player.ok)
             return player;
-        player.value.resetLevel();
-        let remaining = totalExperience;
-        while (remaining > 0) {
-            const amount = Math.min(remaining, MAX_EXPERIENCE_CHANGE);
-            player.value.addExperience(amount);
-            remaining -= amount;
-        }
-        return player.value.getTotalXp() === totalExperience
-            ? ok(undefined)
-            : err("CONFLICT", `玩家 ${playerId} 的经验回读校验失败。`);
+        return setTotalExperience(player.value, totalExperience, `玩家 ${playerId}`);
+    }
+    getFakePlayerExperience(fakePlayerId) {
+        const player = this.findFakePlayer(fakePlayerId);
+        return player.ok ? ok(player.value.getTotalXp()) : player;
+    }
+    setFakePlayerExperience(fakePlayerId, totalExperience) {
+        const player = this.findFakePlayer(fakePlayerId);
+        if (!player.ok)
+            return player;
+        return setTotalExperience(player.value, totalExperience, `假人 ${fakePlayerId}`);
     }
     compareExperience(transfer) {
         const current = this.getPlayerExperience(transfer.playerId);
@@ -101,24 +118,7 @@ export class SapiInventoryAccess {
         const context = this.loadPlayerImages(transfer);
         if (!context.ok)
             return context;
-        const current = readPlayerImage(context.value.player);
-        if (!current.ok)
-            return current;
-        const state = classifyImage(current.value, context.value.before, context.value.after);
-        if (state === target)
-            return ok(undefined);
-        const expectedSource = target === "after" ? "before" : "after";
-        if (state !== expectedSource) {
-            return err("CONFLICT", `库存事务 ${transfer.id} 当前为 ${state}，禁止覆盖外部改动。`);
-        }
-        const image = target === "after" ? context.value.after : context.value.before;
-        const written = writePlayerImage(context.value.player, image);
-        if (!written.ok)
-            return written;
-        const verified = readPlayerImage(context.value.player);
-        return verified.ok && imagesEqual(verified.value, image)
-            ? ok(undefined)
-            : err("CONFLICT", `库存事务 ${transfer.id} 写入 ${target} image 后回读失败。`);
+        return applyVerifiedImage(context.value.player, context.value.before, context.value.after, transfer.id, target);
     }
     loadPlayerImages(transfer) {
         const player = this.findPlayer(transfer.playerId);
@@ -128,6 +128,16 @@ export class SapiInventoryAccess {
         if (!before.ok)
             return before;
         const after = this.snapshots.loadImage(transfer.afterStructureId, player.value.dimension, player.value.location);
+        return after.ok ? ok({ player: player.value, before: before.value, after: after.value }) : after;
+    }
+    loadFakePlayerImages(transfer) {
+        const player = this.findFakePlayer(transfer.fakePlayerId);
+        if (!player.ok)
+            return player;
+        const before = this.snapshots.loadImage(transfer.fakeSnapshotId, player.value.dimension, player.value.location);
+        if (!before.ok)
+            return before;
+        const after = this.snapshots.loadImage(transfer.fakeAfterSnapshotId, player.value.dimension, player.value.location);
         return after.ok ? ok({ player: player.value, before: before.value, after: after.value }) : after;
     }
     cleanupPrepareFailure(transfer, failure) {
@@ -148,6 +158,53 @@ export class SapiInventoryAccess {
             ? err("INVALID_STATE", `玩家 ${playerId} 当前不在线。`)
             : ok(player);
     }
+    findFakePlayer(fakePlayerId) {
+        const player = this.runtime.getHandle(fakePlayerId);
+        return player === undefined
+            ? err("INVALID_STATE", `假人 ${fakePlayerId} 没有在线运行时实例。`)
+            : ok(player);
+    }
+}
+function applyVerifiedImage(player, before, after, transferId, target) {
+    const current = readPlayerImage(player);
+    if (!current.ok)
+        return current;
+    const state = classifyImage(current.value, before, after);
+    if (state === target)
+        return ok(undefined);
+    const expectedSource = target === "after" ? "before" : "after";
+    if (state !== expectedSource) {
+        return err("CONFLICT", `库存事务 ${transferId} 当前为 ${state}，禁止覆盖外部改动。`);
+    }
+    const image = target === "after" ? after : before;
+    const written = writePlayerImage(player, image);
+    if (!written.ok)
+        return written;
+    const verified = readPlayerImage(player);
+    return verified.ok && imagesEqual(verified.value, image)
+        ? ok(undefined)
+        : err("CONFLICT", `库存事务 ${transferId} 写入 ${target} image 后回读失败。`);
+}
+function setTotalExperience(player, totalExperience, subject) {
+    if (!Number.isSafeInteger(totalExperience) || totalExperience < 0) {
+        return err("INVALID_STATE", `${subject}的总经验必须是非负安全整数。`);
+    }
+    player.resetLevel();
+    let remaining = totalExperience;
+    while (remaining > 0) {
+        const amount = Math.min(remaining, MAX_EXPERIENCE_CHANGE);
+        player.addExperience(amount);
+        remaining -= amount;
+    }
+    return player.getTotalXp() === totalExperience
+        ? ok(undefined)
+        : err("CONFLICT", `${subject}的经验回读校验失败。`);
+}
+function toOverview(image) {
+    return image.map((item, slot) => ({
+        slot,
+        item: item === undefined ? null : itemOverview(item),
+    }));
 }
 function itemOverview(item) {
     const durability = item.getComponent("minecraft:durability");

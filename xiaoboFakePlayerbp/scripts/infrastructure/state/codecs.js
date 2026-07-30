@@ -274,9 +274,15 @@ function decodeInventoryTransferRequest(payload) {
     const value = asObject(payload);
     if (value === undefined || !isString(value.kind))
         return undefined;
-    if (value.kind === "recycle_all")
+    if (value.kind === "recycle_all" || value.kind === "swap_inventory" || value.kind === "swap_equipment") {
         return { kind: value.kind };
-    if (value.kind === "swap" || value.kind === "take" || value.kind === "put") {
+    }
+    if (value.kind === "swap") {
+        return isIntegerInRange(value.fakeSlot, 0, 40) && isIntegerInRange(value.playerSlot, 0, 40)
+            ? { kind: value.kind, fakeSlot: value.fakeSlot, playerSlot: value.playerSlot }
+            : undefined;
+    }
+    if (value.kind === "take" || value.kind === "put") {
         return isIntegerInRange(value.fakeSlot, 0, 40) && isIntegerInRange(value.playerSlot, 0, 35)
             ? { kind: value.kind, fakeSlot: value.fakeSlot, playerSlot: value.playerSlot }
             : undefined;

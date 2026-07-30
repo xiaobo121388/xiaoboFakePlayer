@@ -9,6 +9,7 @@ import type {
 import { TOTAL_SLOT_COUNT } from "../../domain/inventory.js";
 import type { ExperienceTransfer, InventoryTransfer } from "../../domain/model.js";
 import { err, ok, type Result } from "../../domain/results.js";
+import { SapiFakePlayerRuntime } from "./fakePlayerRuntime.js";
 import {
     imagesEqual,
     itemStacksEqual,
@@ -22,7 +23,17 @@ const PLAYER_INVENTORY_SLOT_COUNT = 36;
 const MAX_EXPERIENCE_CHANGE = 16_777_216;
 
 export class SapiInventoryAccess implements InventoryAccess {
-    public constructor(private readonly snapshots: StructureInventorySnapshotStore) {}
+    public constructor(
+        private readonly snapshots: StructureInventorySnapshotStore,
+        private readonly runtime: SapiFakePlayerRuntime,
+    ) {}
+
+    public readLiveOverview(fakePlayerId: string): Result<readonly InventorySlotOverview[]> {
+        const player = this.runtime.getHandle(fakePlayerId);
+        if (player === undefined) return err("INVALID_STATE", `假人 ${fakePlayerId} 没有在线运行时实例。`);
+        const image = readPlayerImage(player);
+        return image.ok ? ok(toOverview(image.value)) : image;
+    }
 
     public readSnapshotOverview(
         structureId: string,
@@ -35,12 +46,7 @@ export class SapiInventoryAccess implements InventoryAccess {
             player.value.dimension,
             player.value.location,
         );
-        return image.ok
-            ? ok(image.value.map((item, slot) => ({
-                slot,
-                item: item === undefined ? null : itemOverview(item),
-            })))
-            : image;
+        return image.ok ? ok(toOverview(image.value)) : image;
     }
 
     public prepareTransfer(transfer: InventoryTransfer): Result<void> {
@@ -89,12 +95,33 @@ export class SapiInventoryAccess implements InventoryAccess {
             : current;
     }
 
+    public compareFakeWithImages(transfer: InventoryTransfer): Result<InventoryImageState> {
+        const context = this.loadFakePlayerImages(transfer);
+        if (!context.ok) return context;
+        const current = readPlayerImage(context.value.player);
+        return current.ok
+            ? ok(classifyImage(current.value, context.value.before, context.value.after))
+            : current;
+    }
+
     public applyBeforeImage(transfer: InventoryTransfer): Result<void> {
         return this.applyImage(transfer, "before");
     }
 
     public applyAfterImage(transfer: InventoryTransfer): Result<void> {
         return this.applyImage(transfer, "after");
+    }
+
+    public applyFakeAfterImage(transfer: InventoryTransfer): Result<void> {
+        const context = this.loadFakePlayerImages(transfer);
+        if (!context.ok) return context;
+        return applyVerifiedImage(
+            context.value.player,
+            context.value.before,
+            context.value.after,
+            transfer.id,
+            "after",
+        );
     }
 
     public removeTransferImages(transfer: InventoryTransfer): Result<void> {
@@ -109,21 +136,20 @@ export class SapiInventoryAccess implements InventoryAccess {
     }
 
     public setPlayerExperience(playerId: string, totalExperience: number): Result<void> {
-        if (!Number.isSafeInteger(totalExperience) || totalExperience < 0) {
-            return err("INVALID_STATE", "玩家总经验必须是非负安全整数。");
-        }
         const player = this.findPlayer(playerId);
         if (!player.ok) return player;
-        player.value.resetLevel();
-        let remaining = totalExperience;
-        while (remaining > 0) {
-            const amount = Math.min(remaining, MAX_EXPERIENCE_CHANGE);
-            player.value.addExperience(amount);
-            remaining -= amount;
-        }
-        return player.value.getTotalXp() === totalExperience
-            ? ok(undefined)
-            : err("CONFLICT", `玩家 ${playerId} 的经验回读校验失败。`);
+        return setTotalExperience(player.value, totalExperience, `玩家 ${playerId}`);
+    }
+
+    public getFakePlayerExperience(fakePlayerId: string): Result<number> {
+        const player = this.findFakePlayer(fakePlayerId);
+        return player.ok ? ok(player.value.getTotalXp()) : player;
+    }
+
+    public setFakePlayerExperience(fakePlayerId: string, totalExperience: number): Result<void> {
+        const player = this.findFakePlayer(fakePlayerId);
+        if (!player.ok) return player;
+        return setTotalExperience(player.value, totalExperience, `假人 ${fakePlayerId}`);
     }
 
     public compareExperience(transfer: ExperienceTransfer): Result<InventoryImageState> {
@@ -138,21 +164,13 @@ export class SapiInventoryAccess implements InventoryAccess {
     private applyImage(transfer: InventoryTransfer, target: "after" | "before"): Result<void> {
         const context = this.loadPlayerImages(transfer);
         if (!context.ok) return context;
-        const current = readPlayerImage(context.value.player);
-        if (!current.ok) return current;
-        const state = classifyImage(current.value, context.value.before, context.value.after);
-        if (state === target) return ok(undefined);
-        const expectedSource = target === "after" ? "before" : "after";
-        if (state !== expectedSource) {
-            return err("CONFLICT", `库存事务 ${transfer.id} 当前为 ${state}，禁止覆盖外部改动。`);
-        }
-        const image = target === "after" ? context.value.after : context.value.before;
-        const written = writePlayerImage(context.value.player, image);
-        if (!written.ok) return written;
-        const verified = readPlayerImage(context.value.player);
-        return verified.ok && imagesEqual(verified.value, image)
-            ? ok(undefined)
-            : err("CONFLICT", `库存事务 ${transfer.id} 写入 ${target} image 后回读失败。`);
+        return applyVerifiedImage(
+            context.value.player,
+            context.value.before,
+            context.value.after,
+            transfer.id,
+            target,
+        );
     }
 
     private loadPlayerImages(transfer: InventoryTransfer): Result<{
@@ -170,6 +188,27 @@ export class SapiInventoryAccess implements InventoryAccess {
         if (!before.ok) return before;
         const after = this.snapshots.loadImage(
             transfer.afterStructureId,
+            player.value.dimension,
+            player.value.location,
+        );
+        return after.ok ? ok({ player: player.value, before: before.value, after: after.value }) : after;
+    }
+
+    private loadFakePlayerImages(transfer: InventoryTransfer): Result<{
+        readonly player: Player;
+        readonly before: InventoryImage;
+        readonly after: InventoryImage;
+    }> {
+        const player = this.findFakePlayer(transfer.fakePlayerId);
+        if (!player.ok) return player;
+        const before = this.snapshots.loadImage(
+            transfer.fakeSnapshotId,
+            player.value.dimension,
+            player.value.location,
+        );
+        if (!before.ok) return before;
+        const after = this.snapshots.loadImage(
+            transfer.fakeAfterSnapshotId,
             player.value.dimension,
             player.value.location,
         );
@@ -194,6 +233,60 @@ export class SapiInventoryAccess implements InventoryAccess {
             ? err("INVALID_STATE", `玩家 ${playerId} 当前不在线。`)
             : ok(player);
     }
+
+    private findFakePlayer(fakePlayerId: string): Result<Player> {
+        const player = this.runtime.getHandle(fakePlayerId);
+        return player === undefined
+            ? err("INVALID_STATE", `假人 ${fakePlayerId} 没有在线运行时实例。`)
+            : ok(player);
+    }
+}
+
+function applyVerifiedImage(
+    player: Player,
+    before: InventoryImage,
+    after: InventoryImage,
+    transferId: string,
+    target: "after" | "before",
+): Result<void> {
+    const current = readPlayerImage(player);
+    if (!current.ok) return current;
+    const state = classifyImage(current.value, before, after);
+    if (state === target) return ok(undefined);
+    const expectedSource = target === "after" ? "before" : "after";
+    if (state !== expectedSource) {
+        return err("CONFLICT", `库存事务 ${transferId} 当前为 ${state}，禁止覆盖外部改动。`);
+    }
+    const image = target === "after" ? after : before;
+    const written = writePlayerImage(player, image);
+    if (!written.ok) return written;
+    const verified = readPlayerImage(player);
+    return verified.ok && imagesEqual(verified.value, image)
+        ? ok(undefined)
+        : err("CONFLICT", `库存事务 ${transferId} 写入 ${target} image 后回读失败。`);
+}
+
+function setTotalExperience(player: Player, totalExperience: number, subject: string): Result<void> {
+    if (!Number.isSafeInteger(totalExperience) || totalExperience < 0) {
+        return err("INVALID_STATE", `${subject}的总经验必须是非负安全整数。`);
+    }
+    player.resetLevel();
+    let remaining = totalExperience;
+    while (remaining > 0) {
+        const amount = Math.min(remaining, MAX_EXPERIENCE_CHANGE);
+        player.addExperience(amount);
+        remaining -= amount;
+    }
+    return player.getTotalXp() === totalExperience
+        ? ok(undefined)
+        : err("CONFLICT", `${subject}的经验回读校验失败。`);
+}
+
+function toOverview(image: readonly (ItemStack | undefined)[]): readonly InventorySlotOverview[] {
+    return image.map((item, slot) => ({
+        slot,
+        item: item === undefined ? null : itemOverview(item),
+    }));
 }
 
 function itemOverview(item: ItemStack): InventoryItemOverview {

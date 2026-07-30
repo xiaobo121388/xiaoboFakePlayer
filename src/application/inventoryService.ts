@@ -44,7 +44,7 @@ export interface FakePlayerInventoryOverview {
     readonly id: FakePlayerId;
     readonly name: string;
     readonly recordRevision: number;
-    readonly inventoryRevision: number;
+    readonly inventoryRevision: number | null;
     readonly selectedSlot: number;
     readonly totalExperience: number;
     readonly lastCheckpointTick: number | null;
@@ -77,24 +77,32 @@ export class InventoryService {
         const lease = this.coordinator.tryAcquire([`fake:${id}`, `player:${actor.playerId}`]);
         if (!lease.ok) return lease;
         try {
-            const context = this.loadOfflineRecord(id, expectedRecordRevision);
+            const context = this.loadInventoryRecord(id, expectedRecordRevision);
             if (!context.ok) return context;
-            const inventoryRevision = context.value.record.inventoryRevision;
-            if (inventoryRevision === null) return err("INVALID_STATE", `假人 ${id} 尚无库存快照。`);
             const available = this.ensureTransferResourcesAvailable(id, actor.playerId);
             if (!available.ok) return available;
-            const slots = this.access.readSnapshotOverview(
-                snapshotId(id, inventoryRevision),
-                actor.playerId,
-            );
+            const record = context.value.record;
+            const runtime = record.lifecycle.kind === "online" ? this.runtime.get(id) : undefined;
+            if (record.lifecycle.kind === "online" && (runtime === undefined || !runtime.alive)) {
+                return err("INVALID_STATE", `假人 ${id} 没有存活的在线实例。`);
+            }
+            if (record.lifecycle.kind === "offline" && record.inventoryRevision === null) {
+                return err("INVALID_STATE", `假人 ${id} 尚无库存快照。`);
+            }
+            const slots = record.lifecycle.kind === "online"
+                ? this.access.readLiveOverview(id)
+                : this.access.readSnapshotOverview(
+                    snapshotId(id, record.inventoryRevision as number),
+                    actor.playerId,
+                );
             return slots.ok ? ok({
                 id,
-                name: context.value.record.name,
-                recordRevision: context.value.record.recordRevision,
-                inventoryRevision,
-                selectedSlot: context.value.record.selectedSlot,
-                totalExperience: context.value.record.totalExperience,
-                lastCheckpointTick: context.value.record.lastCheckpointTick,
+                name: record.name,
+                recordRevision: record.recordRevision,
+                inventoryRevision: record.inventoryRevision,
+                selectedSlot: runtime?.selectedSlot ?? record.selectedSlot,
+                totalExperience: runtime?.totalExperience ?? record.totalExperience,
+                lastCheckpointTick: record.lastCheckpointTick,
                 slots: slots.value,
             }) : slots;
         } finally {
@@ -119,10 +127,17 @@ export class InventoryService {
     public checkpointNext(currentTick: number): Result<InventoryCheckpoint | undefined> {
         const loaded = this.stateStore.loadCatalog();
         if (!loaded.ok) return err("CONFLICT", loaded.diagnostics.join("; "));
+        const operations = this.loadOperations();
+        if (!operations.ok) return operations;
+        const pendingIds = new Set([
+            ...Object.values(operations.value.operations.inventoryTransfers).map((transfer) => transfer.fakePlayerId),
+            ...Object.values(operations.value.operations.experienceTransfers).map((transfer) => transfer.fakePlayerId),
+        ]);
         const candidates = Object.values(loaded.state.value.records)
             .filter((record) => (
                 record.lifecycle.kind === "online"
                 && this.runtime.get(record.id)?.alive === true
+                && !pendingIds.has(record.id)
                 && (this.dirty.has(record.id) || checkpointDue(record, currentTick))
             ))
             .sort((left, right) => this.compareCheckpointPriority(left, right));
@@ -156,14 +171,16 @@ export class InventoryService {
         const lease = this.coordinator.tryAcquire([`fake:${id}`, `player:${actor.playerId}`]);
         if (!lease.ok) return lease;
         try {
-            const context = this.loadOfflineRecord(id, expectedRecordRevision);
+            const context = this.loadInventoryRecord(id, expectedRecordRevision);
             if (!context.ok) return context;
-            if (context.value.record.inventoryRevision === null) {
-                return err("INVALID_STATE", `假人 ${id} 尚无库存快照。`);
-            }
             const available = this.ensureTransferResourcesAvailable(id, actor.playerId);
             if (!available.ok) return available;
-            const transfer = createInventoryTransfer(context.value.record, actor.playerId, request);
+            const synchronized = this.synchronizeOnlineRecord(context.value.record);
+            if (!synchronized.ok) return synchronized;
+            if (synchronized.value.inventoryRevision === null) {
+                return err("INVALID_STATE", `假人 ${id} 尚无库存快照。`);
+            }
+            const transfer = createInventoryTransfer(synchronized.value, actor.playerId, request);
             const prepared = this.addInventoryTransfer(transfer);
             return prepared.ok ? this.finishInventoryTransfer(transfer.id) : prepared;
         } finally {
@@ -185,19 +202,21 @@ export class InventoryService {
         const lease = this.coordinator.tryAcquire([`fake:${id}`, `player:${actor.playerId}`]);
         if (!lease.ok) return lease;
         try {
-            const context = this.loadOfflineRecord(id, expectedRecordRevision);
+            const context = this.loadInventoryRecord(id, expectedRecordRevision);
             if (!context.ok) return context;
-            if (amount > context.value.record.totalExperience) {
-                return err("INVALID_STATE", "转移量不能超过假人当前总经验。");
-            }
             const available = this.ensureTransferResourcesAvailable(id, actor.playerId);
             if (!available.ok) return available;
+            const synchronized = this.synchronizeOnlineRecord(context.value.record);
+            if (!synchronized.ok) return synchronized;
+            if (amount > synchronized.value.totalExperience) {
+                return err("INVALID_STATE", "转移量不能超过假人当前总经验。");
+            }
             const playerBefore = this.access.getPlayerExperience(actor.playerId);
             if (!playerBefore.ok) return playerBefore;
             if (!Number.isSafeInteger(playerBefore.value + amount)) {
                 return err("DATA_CAPACITY", "经验转移后的玩家总经验超出安全整数范围。");
             }
-            const transfer = createExperienceTransfer(context.value.record, actor.playerId, playerBefore.value, amount);
+            const transfer = createExperienceTransfer(synchronized.value, actor.playerId, playerBefore.value, amount);
             const prepared = this.addExperienceTransfer(transfer);
             return prepared.ok ? this.finishExperienceTransfer(transfer.id) : prepared;
         } finally {
@@ -391,6 +410,8 @@ export class InventoryService {
                 case "applying": {
                     const playerAfter = this.ensurePlayerInventoryAfter(transfer);
                     if (!playerAfter.ok) return playerAfter;
+                    const fakePlayerAfter = this.ensureFakePlayerInventoryAfter(transfer);
+                    if (!fakePlayerAfter.ok) return fakePlayerAfter;
                     const record = this.commitInventoryCatalog(transfer);
                     if (!record.ok) return record;
                     const advanced = this.advanceInventoryTransfer(transfer.id, "applying", "committed");
@@ -446,6 +467,8 @@ export class InventoryService {
                 case "applying": {
                     const playerAfter = this.ensurePlayerExperienceAfter(transfer);
                     if (!playerAfter.ok) return playerAfter;
+                    const fakePlayerAfter = this.ensureFakePlayerExperienceAfter(transfer);
+                    if (!fakePlayerAfter.ok) return fakePlayerAfter;
                     const record = this.commitExperienceCatalog(transfer);
                     if (!record.ok) return record;
                     const advanced = this.advanceExperienceTransfer(transfer.id, "applying", "committed");
@@ -476,6 +499,21 @@ export class InventoryService {
             : inventoryVerificationFailure(transfer.id, verified);
     }
 
+    private ensureFakePlayerInventoryAfter(transfer: InventoryTransfer): Result<void> {
+        const online = this.transferRequiresLiveFakePlayer(transfer.fakePlayerId);
+        if (!online.ok || !online.value) return online.ok ? ok(undefined) : online;
+        const state = this.access.compareFakeWithImages(transfer);
+        if (!state.ok) return state;
+        if (state.value === "after") return ok(undefined);
+        if (state.value !== "before") return transferConflict(transfer.id, state.value);
+        const applied = this.access.applyFakeAfterImage(transfer);
+        if (!applied.ok) return applied;
+        const verified = this.access.compareFakeWithImages(transfer);
+        return verified.ok && verified.value === "after"
+            ? ok(undefined)
+            : inventoryVerificationFailure(transfer.id, verified);
+    }
+
     private ensurePlayerExperienceAfter(transfer: ExperienceTransfer): Result<void> {
         const state = this.access.compareExperience(transfer);
         if (!state.ok) return state;
@@ -487,6 +525,22 @@ export class InventoryService {
         return verified.ok && verified.value === "after"
             ? ok(undefined)
             : inventoryVerificationFailure(transfer.id, verified);
+    }
+
+    private ensureFakePlayerExperienceAfter(transfer: ExperienceTransfer): Result<void> {
+        const online = this.transferRequiresLiveFakePlayer(transfer.fakePlayerId);
+        if (!online.ok || !online.value) return online.ok ? ok(undefined) : online;
+        const current = this.access.getFakePlayerExperience(transfer.fakePlayerId);
+        if (!current.ok) return current;
+        const after = transfer.fakePlayerBefore - transfer.amount;
+        if (current.value === after) return ok(undefined);
+        if (current.value !== transfer.fakePlayerBefore) return transferConflict(transfer.id, "conflict");
+        const applied = this.access.setFakePlayerExperience(transfer.fakePlayerId, after);
+        if (!applied.ok) return applied;
+        const verified = this.access.getFakePlayerExperience(transfer.fakePlayerId);
+        return verified.ok && verified.value === after
+            ? ok(undefined)
+            : err("CONFLICT", `经验事务 ${transfer.id} 写入假人后回读失败。`);
     }
 
     private commitInventoryCatalog(transfer: InventoryTransfer): Result<FakePlayerRecord> {
@@ -533,6 +587,8 @@ export class InventoryService {
         const state = this.access.compareWithImages(transfer);
         if (!state.ok) return state;
         if (state.value !== "after") return transferConflict(transfer.id, state.value);
+        const fakePlayer = this.ensureFakePlayerInventoryAfter(transfer);
+        if (!fakePlayer.ok) return fakePlayer;
         const record = this.loadCommittedInventoryRecord(transfer);
         return record.ok ? ok(undefined) : record;
     }
@@ -541,6 +597,8 @@ export class InventoryService {
         const state = this.access.compareExperience(transfer);
         if (!state.ok) return state;
         if (state.value !== "after") return transferConflict(transfer.id, state.value);
+        const fakePlayer = this.ensureFakePlayerExperienceAfter(transfer);
+        if (!fakePlayer.ok) return fakePlayer;
         const record = this.loadCommittedExperienceRecord(transfer);
         return record.ok ? ok(undefined) : record;
     }
@@ -563,7 +621,7 @@ export class InventoryService {
             : err("CONFLICT", `经验事务 ${transfer.id} 的 catalog 提交状态不一致。`);
     }
 
-    private loadOfflineRecord(
+    private loadInventoryRecord(
         id: FakePlayerId,
         expectedRecordRevision: number,
     ): Result<{ readonly record: FakePlayerRecord }> {
@@ -574,9 +632,29 @@ export class InventoryService {
         if (record.recordRevision !== expectedRecordRevision) {
             return err("STALE_REVISION", `期望 revision ${expectedRecordRevision}，实际为 ${record.recordRevision}。`);
         }
-        return record.lifecycle.kind === "offline"
+        return record.lifecycle.kind === "offline" || record.lifecycle.kind === "online"
             ? ok({ record })
-            : err("INVALID_STATE", `库存和经验事务只允许从 offline 状态开始，当前为 ${record.lifecycle.kind}。`);
+            : err("INVALID_STATE", `假人 ${id} 当前处于 ${record.lifecycle.kind}，不能管理背包。`);
+    }
+
+    private synchronizeOnlineRecord(record: FakePlayerRecord): Result<FakePlayerRecord> {
+        if (record.lifecycle.kind === "offline") return ok(record);
+        const checkpoint = this.checkpointWithLease(
+            record.id,
+            record.recordRevision,
+            record.lastCheckpointTick ?? 0,
+        );
+        return checkpoint.ok ? ok(checkpoint.value.record) : checkpoint;
+    }
+
+    private transferRequiresLiveFakePlayer(fakePlayerId: FakePlayerId): Result<boolean> {
+        const loaded = this.stateStore.loadCatalog();
+        if (!loaded.ok) return err("CONFLICT", loaded.diagnostics.join("; "));
+        const record = loaded.state.value.records[fakePlayerId];
+        if (record === undefined) return err("NOT_FOUND", `未找到假人 ${fakePlayerId}。`);
+        if (record.lifecycle.kind === "online") return ok(true);
+        if (record.lifecycle.kind === "offline") return ok(false);
+        return err("CONFLICT", `假人 ${fakePlayerId} 在库存事务期间进入 ${record.lifecycle.kind}。`);
     }
 
     private ensureTransferResourcesAvailable(fakePlayerId: string, playerId: string): Result<void> {

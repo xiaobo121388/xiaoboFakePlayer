@@ -27,6 +27,7 @@ import { err, ok, type Result } from "../src/domain/results.js";
 class MemoryStateStore implements WorldStateStore {
     public catalogRevision = 0;
     public failCatalogCommit = false;
+    public operations: PendingOperations = { workspace: {}, inventoryTransfers: {}, experienceTransfers: {} };
 
     public constructor(public catalog: WorldCatalog) {}
 
@@ -39,7 +40,7 @@ class MemoryStateStore implements WorldStateStore {
     }
 
     public loadOperations() {
-        return loaded<PendingOperations>({ workspace: {}, inventoryTransfers: {}, experienceTransfers: {} }, 0);
+        return loaded(this.operations, 0);
     }
 
     public commitCatalog(
@@ -200,6 +201,32 @@ test("checkpoint polling skips a clean fake player before its next periodic chec
 
     assert.deepEqual(result, ok(undefined));
     assert.equal(fixture.state.catalogRevision, 0);
+    assert.deepEqual(fixture.snapshots.removals, []);
+});
+
+test("checkpoint polling skips fake players with pending transfers", () => {
+    const fixture = createFixture();
+    const transfer = {
+        id: "fp0001:inventory:4",
+        fakePlayerId: fixture.record.id,
+        playerId: "owner",
+        fakePlayerRevision: fixture.record.recordRevision,
+        fakeSnapshotId: snapshotId(fixture.record.id, 1),
+        fakeAfterSnapshotId: snapshotId(fixture.record.id, 2),
+        request: { kind: "swap_inventory" as const },
+        beforeStructureId: "before",
+        afterStructureId: "after",
+        phase: "prepared" as const,
+    };
+    fixture.state.operations = {
+        workspace: {},
+        inventoryTransfers: { [transfer.id]: transfer },
+        experienceTransfers: {},
+    };
+
+    assert.deepEqual(fixture.service.checkpointNext(40), ok(undefined));
+    assert.equal(fixture.state.catalogRevision, 0);
+    assert.equal(fixture.snapshots.has(snapshotId(fixture.record.id, 2)), false);
     assert.deepEqual(fixture.snapshots.removals, []);
 });
 

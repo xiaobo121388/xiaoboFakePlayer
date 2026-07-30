@@ -1,7 +1,9 @@
-import { world } from "@minecraft/server";
+import { Direction, world } from "@minecraft/server";
 
 import type {
     AttackTargetQuery,
+    BlockFace,
+    RuntimeBlockHit,
     RuntimeEntityTarget,
     WorldQueries,
 } from "../../application/ports.js";
@@ -17,6 +19,31 @@ export class SapiWorldQueries implements WorldQueries {
 
     public isSolidBlock(dimension: DimensionKey, position: Point): boolean {
         return world.getDimension(dimension).getBlock(position)?.isSolid === true;
+    }
+
+    public getBlockFromViewDirection(
+        fakePlayerId: FakePlayerId,
+        maxDistance: number,
+    ): RuntimeBlockHit | undefined {
+        const fakePlayer = this.runtime.getHandle(fakePlayerId);
+        if (fakePlayer === undefined) return undefined;
+        const origin = fakePlayer.getHeadLocation();
+        const hit = fakePlayer.dimension.getBlockFromRay(
+            origin,
+            fakePlayer.getViewDirection(),
+            { maxDistance },
+        );
+        if (hit === undefined) return undefined;
+        const hitLocation = {
+            x: hit.block.location.x + hit.faceLocation.x,
+            y: hit.block.location.y + hit.faceLocation.y,
+            z: hit.block.location.z + hit.faceLocation.z,
+        };
+        return {
+            position: { ...hit.block.location },
+            face: fromDirection(hit.face),
+            distance: Math.sqrt(distanceSquared(origin, hitLocation)),
+        };
     }
 
     public hasBlockLineOfSight(
@@ -143,4 +170,15 @@ function sameBlock(left: Point, right: Point): boolean {
     return Math.floor(left.x) === Math.floor(right.x)
         && Math.floor(left.y) === Math.floor(right.y)
         && Math.floor(left.z) === Math.floor(right.z);
+}
+
+function fromDirection(direction: Direction): BlockFace {
+    switch (direction) {
+        case Direction.Down: return "down";
+        case Direction.East: return "east";
+        case Direction.North: return "north";
+        case Direction.South: return "south";
+        case Direction.Up: return "up";
+        case Direction.West: return "west";
+    }
 }

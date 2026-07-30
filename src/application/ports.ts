@@ -75,7 +75,14 @@ export type BlockFace = "down" | "east" | "north" | "south" | "up" | "west";
 export type RuntimeFakePlayerAction =
     | { readonly kind: "attack_entity"; readonly targetId: string }
     | { readonly kind: "break_block"; readonly position: Point; readonly face: BlockFace }
-    | { readonly kind: "interact_block"; readonly position: Point; readonly face: BlockFace; readonly emptyHand?: boolean }
+    | {
+        readonly kind: "interact_block";
+        readonly position: Point;
+        readonly face: BlockFace;
+        readonly selection?:
+            | { readonly mode: "item"; readonly slot: number; readonly emptyHand: boolean }
+            | { readonly mode: "slot"; readonly slot: number };
+    }
     | { readonly kind: "interact_entity"; readonly targetId: string }
     | { readonly kind: "jump" }
     | { readonly kind: "look_at"; readonly position: Point }

@@ -1,6 +1,6 @@
 import { BlockTypes, Direction, EntityComponentTypes, GameMode, world, } from "@minecraft/server";
 import { getPlayerSkin, PersonaArmSize, PersonaPieceType, SimulatedPlayer, spawnSimulatedPlayer, } from "@minecraft/server-gametest";
-import { INVENTORY_SLOT_COUNT } from "../../domain/inventory.js";
+import { HOTBAR_SLOT_COUNT, INVENTORY_SLOT_COUNT } from "../../domain/inventory.js";
 const TAG_PREFIX = "xiaobo_fp_";
 const MAX_EXPERIENCE_CHANGE = 16_777_216;
 export class SapiFakePlayerRuntime {
@@ -115,23 +115,44 @@ export class SapiFakePlayerRuntime {
                 return { accepted };
             }
             case "interact_block": {
-                const inventory = action.emptyHand
+                const selection = action.selection;
+                if (selection?.mode === "slot") {
+                    if (selection.slot < 0 || selection.slot >= HOTBAR_SLOT_COUNT) {
+                        throw new RangeError(`interact ${id}: 快捷栏槽位必须是 0 到 ${HOTBAR_SLOT_COUNT - 1}。`);
+                    }
+                    player.selectedSlotIndex = selection.slot;
+                }
+                const inventory = selection?.mode === "item"
                     ? player.getComponent(EntityComponentTypes.Inventory)
                     : undefined;
+                const container = inventory?.container;
                 const selectedSlot = player.selectedSlotIndex;
-                const selectedItem = inventory?.container.getItem(selectedSlot);
-                if (action.emptyHand && inventory === undefined) {
-                    throw new Error(`interact ${id}: 缺少库存容器，无法执行空手交互。`);
+                const selectedItem = selection?.mode === "item" && selection.emptyHand
+                    ? container?.getItem(selectedSlot)
+                    : undefined;
+                if (selection?.mode === "item" && container === undefined) {
+                    throw new Error(`interact ${id}: 缺少库存容器，无法准备交互物品。`);
                 }
+                const swapsItem = selection?.mode === "item"
+                    && !selection.emptyHand
+                    && selection.slot !== selectedSlot;
                 let accepted;
                 try {
-                    if (action.emptyHand)
-                        inventory?.container.setItem(selectedSlot);
+                    if (selection?.mode === "item") {
+                        if (selection.emptyHand)
+                            container?.setItem(selectedSlot);
+                        else if (swapsItem)
+                            container?.swapItems(selection.slot, selectedSlot, container);
+                    }
                     accepted = player.interactWithBlock(action.position, toDirection(action.face));
                 }
                 finally {
-                    if (action.emptyHand && player.isValid)
-                        inventory?.container.setItem(selectedSlot, selectedItem);
+                    if (selection?.mode === "item" && player.isValid) {
+                        if (selection.emptyHand)
+                            container?.setItem(selectedSlot, selectedItem);
+                        else if (swapsItem)
+                            container?.swapItems(selection.slot, selectedSlot, container);
+                    }
                 }
                 return { accepted, inventoryChanged: accepted };
             }

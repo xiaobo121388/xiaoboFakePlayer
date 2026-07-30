@@ -1,6 +1,7 @@
 import { Player, world, type RawMessage } from "@minecraft/server";
 import { ActionFormData, ModalFormData } from "@minecraft/server-ui";
 
+import { HOTBAR_SLOT_COUNT } from "../../domain/inventory.js";
 import type { BehaviorConfig, FakePlayerRecord, Point } from "../../domain/model.js";
 import type { CommandServices } from "../commands.js";
 import { actorIdentity, isRealPlayer } from "../playerContext.js";
@@ -265,8 +266,8 @@ async function openPlaceSettingsForm(
             defaultValue: config.position === null ? "" : String(config.position.z),
         });
     if (selectionMode === "slot") {
-        form.slider(t("xiaobo.fp.form.behavior.place.slot"), 0, 35, {
-            defaultValue: config.slot,
+        form.slider(t("xiaobo.fp.form.behavior.place.slot"), 0, HOTBAR_SLOT_COUNT - 1, {
+            defaultValue: Math.min(config.slot, HOTBAR_SLOT_COUNT - 1),
             valueStep: 1,
         });
     } else {

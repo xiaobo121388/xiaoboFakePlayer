@@ -1,4 +1,4 @@
-import { INVENTORY_SLOT_COUNT } from "../domain/inventory.js";
+import { HOTBAR_SLOT_COUNT, INVENTORY_SLOT_COUNT } from "../domain/inventory.js";
 import {
     decodeBehaviorConfig,
     EXCLUSIVE_ACTION_BEHAVIORS,
@@ -197,6 +197,11 @@ export class BehaviorService {
         const normalized = decodeBehaviorConfig(config);
         if (normalizedExpected === undefined || normalized === undefined) {
             return err("INVALID_STATE", "自动行为配置无效。");
+        }
+        if (normalized.place.selectionMode === "slot"
+            && normalized.place.slot >= HOTBAR_SLOT_COUNT
+            && JSON.stringify(normalized.place) !== JSON.stringify(normalizedExpected.place)) {
+            return err("INVALID_SLOT", `自动交互快捷栏必须是 0 到 ${HOTBAR_SLOT_COUNT - 1} 的整数。`);
         }
         const permissions = this.stateStore.loadPermissions();
         if (!permissions.ok) return err("CONFLICT", permissions.diagnostics.join("; "));
@@ -604,6 +609,9 @@ export class BehaviorService {
             return { ...emptyOutcome(true), placeDiagnostic: describePlace(record, "block_budget_exhausted") };
         }
         const config = record.behavior.place;
+        if (config.selectionMode === "slot" && config.slot >= HOTBAR_SLOT_COUNT) {
+            return { ...emptyOutcome(), placeDiagnostic: describePlace(record, "hotbar_slot_invalid") };
+        }
         const inventorySlot = this.runtime.resolveInventorySlot(record.id, config.selectionMode === "slot"
             ? { mode: "slot", slot: config.slot }
             : { mode: "item", itemTypeId: config.itemTypeId });
@@ -651,14 +659,17 @@ export class BehaviorService {
             }
             const receipt = this.executeRuntime(record.id, directPlacement
                 ? { kind: "place_block_direct", slot: inventorySlot.slot, position: target }
-                : inventorySlot.itemTypeId === null
-                    ? { kind: "interact_block", position: hit.position, face: hit.face, emptyHand: true }
-                    : {
-                    kind: "use_item_on_block",
-                    slot: inventorySlot.slot,
+                : {
+                    kind: "interact_block",
                     position: hit.position,
                     face: hit.face,
-                    faceLocation: hit.faceLocation,
+                    selection: config.selectionMode === "slot"
+                        ? { mode: "slot", slot: inventorySlot.slot }
+                        : {
+                            mode: "item",
+                            slot: inventorySlot.slot,
+                            emptyHand: inventorySlot.itemTypeId === null,
+                        },
                 });
             return {
                 attempted: true,
@@ -710,19 +721,17 @@ export class BehaviorService {
             if (!chestSupport && support.solid !== true) continue;
             const receipt = this.executeRuntime(record.id, directPlacement
                 ? { kind: "place_block_direct", slot: inventorySlot.slot, position: target }
-                : inventorySlot.itemTypeId === null
-                    ? {
-                        kind: "interact_block",
-                        position: supportPosition,
-                        face: candidate.face,
-                        emptyHand: true,
-                    }
-                    : {
-                    kind: "use_item_on_block",
-                    slot: inventorySlot.slot,
+                : {
+                    kind: "interact_block",
                     position: supportPosition,
                     face: candidate.face,
-                    faceLocation: faceCenter(candidate.face),
+                    selection: config.selectionMode === "slot"
+                        ? { mode: "slot", slot: inventorySlot.slot }
+                        : {
+                            mode: "item",
+                            slot: inventorySlot.slot,
+                            emptyHand: inventorySlot.itemTypeId === null,
+                        },
                 });
             return {
                 attempted: true,

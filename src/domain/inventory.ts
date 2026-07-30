@@ -1,6 +1,7 @@
 import { err, ok, type Result } from "./results.js";
 
 export const INVENTORY_SLOT_COUNT = 36;
+export const HOTBAR_SLOT_COUNT = 9;
 export const TOTAL_SLOT_COUNT = 41;
 
 export const EQUIPMENT_SLOT = {

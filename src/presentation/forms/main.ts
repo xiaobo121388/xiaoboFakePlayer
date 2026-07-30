@@ -181,7 +181,7 @@ async function openActionForm(player: Player, services: CommandServices, record:
             [t("xiaobo.fp.form.action.lookat"), {
                 kind: "look_at_once",
                 dimension: player.dimension.id,
-                position: player.location,
+                position: player.getHeadLocation(),
             }],
             [t("xiaobo.fp.form.action.lookat_continuous"), { kind: "look_at_entity", targetId: player.id }],
             [t("xiaobo.fp.form.action.jump"), { kind: "jump" }],
@@ -201,7 +201,7 @@ async function openActionForm(player: Player, services: CommandServices, record:
         const current = loadCurrentRecord(player, services, record.id);
         if (!current.ok) return sendError(player, current.error.message);
         const action = selected[1].kind === "look_at_once"
-            ? { kind: "look_at_once" as const, dimension: player.dimension.id, position: player.location }
+            ? { kind: "look_at_once" as const, dimension: player.dimension.id, position: player.getHeadLocation() }
             : selected[1];
         const result = services.behavior.perform(
             actorIdentity(player),

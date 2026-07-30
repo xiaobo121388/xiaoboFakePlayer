@@ -51,6 +51,7 @@ export interface RuntimeFakePlayer {
     readonly name: string;
     readonly dimension: DimensionKey;
     readonly position: Point;
+    readonly headPosition: Point;
     readonly rotation: Rotation;
     readonly gameMode: FakePlayerGameMode;
     readonly isSneaking: boolean;
@@ -78,7 +79,7 @@ export type RuntimeFakePlayerAction =
     | { readonly kind: "interact_entity"; readonly targetId: string }
     | { readonly kind: "jump" }
     | { readonly kind: "look_at"; readonly position: Point }
-    | { readonly kind: "look_at_once"; readonly position: Point }
+    | { readonly kind: "look_at_once"; readonly rotation: Rotation }
     | { readonly kind: "look_at_entity"; readonly targetId: string }
     | { readonly kind: "move_to"; readonly position: Point; readonly speed: number }
     | { readonly kind: "navigate"; readonly position: Point; readonly speed: number }

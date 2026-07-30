@@ -66,6 +66,7 @@ class MemoryRuntime implements FakePlayerRuntime {
             name: request.name,
             dimension: request.dimension,
             position: request.position,
+            headPosition: { x: request.position.x, y: request.position.y + 1.62, z: request.position.z },
             rotation: request.rotation,
             gameMode: request.gameMode,
             isSneaking: false,

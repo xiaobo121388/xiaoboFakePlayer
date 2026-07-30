@@ -99,7 +99,9 @@ export interface BehaviorConfig {
         readonly intervalTicks: number;
         readonly mode: "front" | "position";
         readonly position: Point | null;
+        readonly selectionMode: "item" | "slot";
         readonly slot: number;
+        readonly itemTypeId: string | null;
     };
     readonly use: {
         readonly enabled: boolean;

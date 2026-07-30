@@ -59,12 +59,22 @@ export interface RuntimeFakePlayer {
     readonly alive: boolean;
 }
 
+export type RuntimeInventorySelection =
+    | { readonly mode: "item"; readonly itemTypeId: string | null }
+    | { readonly mode: "slot"; readonly slot: number };
+
+export interface RuntimeInventorySlot {
+    readonly slot: number;
+    readonly itemTypeId: string | null;
+    readonly placeableBlock: boolean;
+}
+
 export type BlockFace = "down" | "east" | "north" | "south" | "up" | "west";
 
 export type RuntimeFakePlayerAction =
     | { readonly kind: "attack_entity"; readonly targetId: string }
     | { readonly kind: "break_block"; readonly position: Point; readonly face: BlockFace }
-    | { readonly kind: "interact_block"; readonly position: Point; readonly face: BlockFace }
+    | { readonly kind: "interact_block"; readonly position: Point; readonly face: BlockFace; readonly emptyHand?: boolean }
     | { readonly kind: "interact_entity"; readonly targetId: string }
     | { readonly kind: "jump" }
     | { readonly kind: "look_at"; readonly position: Point }
@@ -99,6 +109,7 @@ export interface FakePlayerRuntime {
     spawn(request: SpawnFakePlayerRequest): RuntimeFakePlayer;
     disconnect(id: FakePlayerId): boolean;
     respawn(id: FakePlayerId, location?: SavedLocation): boolean;
+    resolveInventorySlot(id: FakePlayerId, selection: RuntimeInventorySelection): RuntimeInventorySlot | undefined;
     perform(id: FakePlayerId, action: RuntimeFakePlayerAction): RuntimeActionReceipt;
     get(id: FakePlayerId): RuntimeFakePlayer | undefined;
     listTagged(): readonly RuntimeFakePlayer[];
@@ -143,6 +154,7 @@ export interface InventoryAccess {
         structureId: string,
         playerId: string,
     ): Result<readonly InventorySlotOverview[]>;
+    getPlayerMainhandItemTypeId(playerId: string): Result<string | null>;
     prepareTransfer(transfer: InventoryTransfer): Result<void>;
     compareWithImages(transfer: InventoryTransfer): Result<InventoryImageState>;
     compareFakeWithImages(transfer: InventoryTransfer): Result<InventoryImageState>;

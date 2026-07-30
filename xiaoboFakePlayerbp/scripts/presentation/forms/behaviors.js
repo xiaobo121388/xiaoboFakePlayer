@@ -163,7 +163,47 @@ async function openUseForm(player, services, record, openDetail) {
 }
 async function openPlaceForm(player, services, record, openDetail) {
     const config = record.behavior.place;
-    const response = await new ModalFormData()
+    const currentSource = config.selectionMode === "slot"
+        ? { translate: "xiaobo.fp.form.behavior.place.current_slot", with: [String(config.slot)] }
+        : config.itemTypeId === null
+            ? t("xiaobo.fp.form.behavior.place.current_empty")
+            : { translate: "xiaobo.fp.form.behavior.place.current_item", with: [config.itemTypeId] };
+    const actions = [];
+    const form = new ActionFormData()
+        .title(t("xiaobo.fp.form.behavior.place"))
+        .body({
+        rawtext: [
+            t("xiaobo.fp.form.behavior.place.body"),
+            { text: "\n" },
+            currentSource,
+        ],
+    });
+    form.button(t("xiaobo.fp.form.behavior.place.by_slot"));
+    actions.push(() => openPlaceSettingsForm(player, services, record, openDetail, "slot"));
+    form.button(t("xiaobo.fp.form.behavior.place.by_item"));
+    actions.push(() => openPlaceSettingsForm(player, services, record, openDetail, "item"));
+    form.button(t("xiaobo.fp.form.behavior.place.sync_mainhand"));
+    actions.push(async () => {
+        if (!ready(player, services))
+            return;
+        const itemTypeId = services.inventory.getPlayerMainhandItemTypeId(actorIdentity(player));
+        if (!itemTypeId.ok)
+            return sendError(player, itemTypeId.error.message);
+        await saveBehavior(player, services, record, {
+            ...record.behavior,
+            place: { ...config, selectionMode: "item", itemTypeId: itemTypeId.value },
+        }, openDetail);
+    });
+    form.button(t("xiaobo.fp.form.back"));
+    actions.push(() => openBehaviorForm(player, services, record, openDetail));
+    const response = await form.show(player);
+    const action = response.selection === undefined ? undefined : actions[response.selection];
+    if (!response.canceled && action !== undefined && player.isValid)
+        await action();
+}
+async function openPlaceSettingsForm(player, services, record, openDetail, selectionMode) {
+    const config = record.behavior.place;
+    const form = new ModalFormData()
         .title(t("xiaobo.fp.form.behavior.place"))
         .toggle(t("xiaobo.fp.form.behavior.enabled"), { defaultValue: config.enabled })
         .textField(t("xiaobo.fp.form.behavior.interval"), "10", { defaultValue: String(config.intervalTicks) })
@@ -176,17 +216,27 @@ async function openPlaceForm(player, services, record, openDetail) {
     })
         .textField(t("xiaobo.fp.form.behavior.place.z"), "0", {
         defaultValue: config.position === null ? "" : String(config.position.z),
-    })
-        .slider(t("xiaobo.fp.form.behavior.place.slot"), 0, 35, { defaultValue: config.slot, valueStep: 1 })
-        .submitButton(t("xiaobo.fp.form.behavior.save"))
-        .show(player);
+    });
+    if (selectionMode === "slot") {
+        form.slider(t("xiaobo.fp.form.behavior.place.slot"), 0, 35, {
+            defaultValue: config.slot,
+            valueStep: 1,
+        });
+    }
+    else {
+        form.textField(t("xiaobo.fp.form.behavior.place.item"), "minecraft:oak_planks", {
+            defaultValue: config.itemTypeId ?? "",
+        });
+    }
+    const response = await form.submitButton(t("xiaobo.fp.form.behavior.save")).show(player);
     if (response.canceled || response.formValues === undefined || !ready(player, services))
         return;
-    const [enabled, intervalTicks, modeIndex, x, y, z, slot] = response.formValues;
+    const [enabled, intervalTicks, modeIndex, x, y, z, selection] = response.formValues;
     const mode = typeof modeIndex === "number" ? PLACE_MODES[modeIndex] : undefined;
     if (typeof enabled !== "boolean" || mode === undefined || typeof x !== "string"
-        || typeof y !== "string" || typeof z !== "string" || typeof slot !== "number") {
-        return sendError(player, "放置行为表单数据无效。");
+        || typeof y !== "string" || typeof z !== "string"
+        || (selectionMode === "slot" ? typeof selection !== "number" : typeof selection !== "string")) {
+        return sendError(player, "自动交互（放置）表单数据无效。");
     }
     const position = parseOptionalBlockPosition(x, y, z);
     if (position === undefined || (mode === "position" && position === null)) {
@@ -194,7 +244,15 @@ async function openPlaceForm(player, services, record, openDetail) {
     }
     await saveBehavior(player, services, record, {
         ...record.behavior,
-        place: { enabled, intervalTicks: Number(intervalTicks), mode, position, slot },
+        place: {
+            enabled,
+            intervalTicks: Number(intervalTicks),
+            mode,
+            position,
+            selectionMode,
+            slot: selectionMode === "slot" ? selection : config.slot,
+            itemTypeId: selectionMode === "item" ? selection.trim() || null : config.itemTypeId,
+        },
     }, openDetail);
 }
 async function saveBehavior(player, services, record, config, openDetail) {

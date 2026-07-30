@@ -88,6 +88,10 @@ class MemoryRuntime implements FakePlayerRuntime {
         return true;
     }
 
+    public resolveInventorySlot() {
+        return undefined;
+    }
+
     public perform(_id: FakePlayerId, _action: RuntimeFakePlayerAction): RuntimeActionReceipt {
         return { accepted: true };
     }

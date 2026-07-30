@@ -22,8 +22,11 @@ import type {
     RuntimeActionReceipt,
     RuntimeFakePlayer,
     RuntimeFakePlayerAction,
+    RuntimeInventorySelection,
+    RuntimeInventorySlot,
     SpawnFakePlayerRequest,
 } from "../../application/ports.js";
+import { INVENTORY_SLOT_COUNT } from "../../domain/inventory.js";
 import type { FakePlayerGameMode, FakePlayerId, FakePlayerSkin, SavedLocation } from "../../domain/model.js";
 
 const TAG_PREFIX = "xiaobo_fp_";
@@ -93,6 +96,33 @@ export class SapiFakePlayerRuntime implements FakePlayerRuntime {
         return true;
     }
 
+    public resolveInventorySlot(
+        id: FakePlayerId,
+        selection: RuntimeInventorySelection,
+    ): RuntimeInventorySlot | undefined {
+        const player = this.getHandle(id);
+        if (player === undefined) return undefined;
+        const inventory = player.getComponent(
+            EntityComponentTypes.Inventory,
+        ) as EntityInventoryComponent | undefined;
+        const container = inventory?.container;
+        if (container === undefined) throw new Error(`inventory ${id}: 缺少库存容器。`);
+        const slot = selection.mode === "slot"
+            ? selection.slot
+            : selection.itemTypeId === null
+                ? player.selectedSlotIndex
+                : findInventorySlot(container, selection.itemTypeId);
+        if (slot === undefined) return undefined;
+        const item = selection.mode === "item" && selection.itemTypeId === null
+            ? undefined
+            : container.getItem(slot);
+        return {
+            slot,
+            itemTypeId: item?.typeId ?? null,
+            placeableBlock: item !== undefined && BlockTypes.get(item.typeId) !== undefined,
+        };
+    }
+
     public perform(id: FakePlayerId, action: RuntimeFakePlayerAction): RuntimeActionReceipt {
         const player = this.getHandle(id);
         if (player === undefined) return { accepted: false };
@@ -113,7 +143,21 @@ export class SapiFakePlayerRuntime implements FakePlayerRuntime {
                 return { accepted };
             }
             case "interact_block": {
-                const accepted = player.interactWithBlock(action.position, toDirection(action.face));
+                const inventory = action.emptyHand
+                    ? player.getComponent(EntityComponentTypes.Inventory) as EntityInventoryComponent | undefined
+                    : undefined;
+                const selectedSlot = player.selectedSlotIndex;
+                const selectedItem = inventory?.container.getItem(selectedSlot);
+                if (action.emptyHand && inventory === undefined) {
+                    throw new Error(`interact ${id}: 缺少库存容器，无法执行空手交互。`);
+                }
+                let accepted: boolean;
+                try {
+                    if (action.emptyHand) inventory?.container.setItem(selectedSlot);
+                    accepted = player.interactWithBlock(action.position, toDirection(action.face));
+                } finally {
+                    if (action.emptyHand && player.isValid) inventory?.container.setItem(selectedSlot, selectedItem);
+                }
                 return { accepted, inventoryChanged: accepted };
             }
             case "interact_entity": {
@@ -365,6 +409,17 @@ function addExperience(player: SimulatedPlayer, totalExperience: number): void {
 
 function formatPoint(point: { readonly x: number; readonly y: number; readonly z: number }): string {
     return `${point.x},${point.y},${point.z}`;
+}
+
+function findInventorySlot(
+    container: EntityInventoryComponent["container"],
+    itemTypeId: string | null,
+): number | undefined {
+    for (let slot = 0; slot < INVENTORY_SLOT_COUNT; slot += 1) {
+        const item = container.getItem(slot);
+        if (itemTypeId === null ? item === undefined : item?.typeId === itemTypeId) return slot;
+    }
+    return undefined;
 }
 
 function toPlayerSkinData(skin: Extract<FakePlayerSkin, { kind: "persona" }>): PlayerSkinData {

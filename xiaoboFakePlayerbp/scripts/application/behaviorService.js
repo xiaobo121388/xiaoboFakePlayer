@@ -7,8 +7,9 @@ const MAX_INTERACTION_DISTANCE_SQUARED = MAX_INTERACTION_DISTANCE * MAX_INTERACT
 const MAX_AUTOMATIC_ACTIONS_PER_TICK = 8;
 const MAX_BLOCK_READS_PER_TICK = 256;
 const ATTACK_QUERY_LIMIT = 16;
-// 假人眼睛位于脚部之上约 1.62 格；判定"眼前方块"和破坏面方向都应以眼睛为基准，否则
-// 玩家实际看到的方块格会被算成脚部相邻格，破坏面在垂直方向上也会被误判成 up/down。
+// 挂机假人的“面前”语义是眼睛视线 7 格内的首个方块命中。
+const FRONT_MINE_RAY_DISTANCE = 7;
+// 非射线目标没有原生命中面，以眼睛位置推导破坏面。
 const MINE_EYE_HEIGHT = 1.62;
 const AUTOMATIC_BEHAVIORS = ["follow", "attack", "mine", "use"];
 export class BehaviorService {
@@ -298,11 +299,14 @@ export class BehaviorService {
             };
         }
         const target = resolved.target.position;
-        if (this.worldQueries.hasBlockLineOfSight(record.id, resolved.target.dimension, target, MAX_INTERACTION_DISTANCE)) {
+        const inReach = resolved.target.distance === undefined
+            ? this.worldQueries.hasBlockLineOfSight(record.id, resolved.target.dimension, target, MAX_INTERACTION_DISTANCE)
+            : resolved.target.distance <= MAX_INTERACTION_DISTANCE;
+        if (inReach) {
             const receipt = this.executeRuntime(record.id, {
                 kind: "break_block",
                 position: target,
-                face: mineTargetFace(eyePosition(runtime.position), target),
+                face: resolved.target.face ?? mineTargetFace(eyePosition(runtime.position), target),
             });
             if (receipt.accepted)
                 this.activeMineTargets.set(record.id, resolved.target);
@@ -335,6 +339,31 @@ export class BehaviorService {
     }
     resolveMineTarget(record, runtimePosition, dimension, blockBudget) {
         const config = record.behavior.mine;
+        if (config.direction === "front") {
+            if (blockBudget < 1)
+                return { blockReads: 0, scanPending: true };
+            const hit = this.worldQueries.getBlockFromViewDirection(record.id, FRONT_MINE_RAY_DISTANCE);
+            if (hit === undefined) {
+                return {
+                    blockReads: 0,
+                    scanPending: false,
+                    diagnostic: describeMine(record, "no_target", floorPoint(eyePosition(runtimePosition))),
+                };
+            }
+            const info = this.worldQueries.getBlockInfo(dimension, hit.position);
+            if (!isMineTarget(info, config.blockTypeId)) {
+                return {
+                    blockReads: 1,
+                    scanPending: false,
+                    diagnostic: describeMine(record, "no_target", hit.position, info),
+                };
+            }
+            return {
+                target: { dimension, position: hit.position, face: hit.face, distance: hit.distance },
+                blockReads: 1,
+                scanPending: false,
+            };
+        }
         const cached = this.mineTargets.get(record.id);
         let blockReads = 0;
         if (cached !== undefined && cached.dimension === dimension) {
@@ -347,7 +376,7 @@ export class BehaviorService {
             }
             this.mineTargets.delete(record.id);
         }
-        const origin = directMineTarget(runtimePosition, this.runtime.get(record.id)?.rotation.y ?? 0, config.direction);
+        const origin = directMineTarget(runtimePosition, config.direction);
         if (config.searchRadius === 0) {
             if (blockReads >= blockBudget)
                 return { blockReads, scanPending: true };
@@ -364,13 +393,11 @@ export class BehaviorService {
         const signature = `${dimension}:${origin.x}:${origin.y}:${origin.z}:${config.blockTypeId}:${config.searchRadius}`;
         let scan = this.mineScans.get(record.id);
         if (scan === undefined || scan.signature !== signature) {
-            scan = { signature, origin, layer: 0, radius: 0, cursor: 0 };
+            scan = { signature, origin, radius: 0, cursor: 0 };
             this.mineScans.set(record.id, scan);
         }
         while (blockReads < blockBudget) {
-            const offset = config.direction === "front"
-                ? nextFrontOffset(scan, config.searchRadius)
-                : nextShellOffset(scan, config.searchRadius);
+            const offset = nextShellOffset(scan, config.searchRadius);
             if (offset === undefined) {
                 this.mineScans.delete(record.id);
                 return {
@@ -481,62 +508,16 @@ function describeMine(record, state, position, info) {
 function formatPoint({ x, y, z }) {
     return `${x},${y},${z}`;
 }
-function directMineTarget(position, yaw, direction) {
-    // down/up 与眼睛无关：向下挖脚下方块、向上挖头顶上一格。front 取"眼前"一格，
-    // 必须以眼睛所在方块格为基准，否则会落到脚部相邻层。
+function directMineTarget(position, direction) {
     if (direction === "down") {
         const base = floorPoint(position);
         return { x: base.x, y: base.y - 1, z: base.z };
     }
-    if (direction === "up") {
-        const base = floorPoint(position);
-        return { x: base.x, y: base.y + 2, z: base.z };
-    }
-    const eyes = floorPoint(eyePosition(position));
-    const radians = yaw * Math.PI / 180;
-    return {
-        x: eyes.x + Math.round(-Math.sin(radians)),
-        y: eyes.y,
-        z: eyes.z + Math.round(Math.cos(radians)),
-    };
+    const base = floorPoint(position);
+    return { x: base.x, y: base.y + 2, z: base.z };
 }
 function eyePosition(position) {
     return { x: position.x, y: position.y + MINE_EYE_HEIGHT, z: position.z };
-}
-function nextFrontOffset(scan, maximumRadius) {
-    while (scan.layer <= maximumRadius * 2) {
-        const horizontal = nextHorizontalShellOffset(scan, maximumRadius);
-        if (horizontal !== undefined) {
-            return { ...horizontal, y: centeredLayerOffset(scan.layer) };
-        }
-        scan.layer += 1;
-        scan.radius = 0;
-        scan.cursor = 0;
-    }
-    return undefined;
-}
-function nextHorizontalShellOffset(scan, maximumRadius) {
-    while (scan.radius <= maximumRadius) {
-        const width = scan.radius * 2 + 1;
-        const area = width * width;
-        while (scan.cursor < area) {
-            const index = scan.cursor;
-            scan.cursor += 1;
-            const x = index % width - scan.radius;
-            const z = Math.floor(index / width) - scan.radius;
-            if (Math.max(Math.abs(x), Math.abs(z)) === scan.radius)
-                return { x, y: 0, z };
-        }
-        scan.radius += 1;
-        scan.cursor = 0;
-    }
-    return undefined;
-}
-function centeredLayerOffset(index) {
-    if (index === 0)
-        return 0;
-    const distance = Math.ceil(index / 2);
-    return index % 2 === 1 ? -distance : distance;
 }
 function nextShellOffset(scan, maximumRadius) {
     while (scan.radius <= maximumRadius) {

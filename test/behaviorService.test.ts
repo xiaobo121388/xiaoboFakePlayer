@@ -10,6 +10,7 @@ import type {
     InventoryAccess,
     InventorySnapshotStore,
     RuntimeActionReceipt,
+    RuntimeBlockHit,
     RuntimeBlockInfo,
     RuntimeEntityTarget,
     RuntimeFakePlayer,
@@ -110,6 +111,8 @@ class MemoryWorldQueries implements WorldQueries {
     public solid = true;
     public visible = true;
     public entityDistanceSquared: number | undefined = 1;
+    public viewBlockHit: RuntimeBlockHit | undefined;
+    public readonly viewBlockMaxDistances: number[] = [];
     public readonly onlinePlayers = new Map<string, RuntimeEntityTarget>();
     public attackTargets: readonly RuntimeEntityTarget[] = [];
     public blockInfo: RuntimeBlockInfo | undefined;
@@ -147,6 +150,11 @@ class MemoryWorldQueries implements WorldQueries {
 
     public findAttackTargets(_fakePlayerId: FakePlayerId, _query: AttackTargetQuery): readonly RuntimeEntityTarget[] {
         return this.attackTargets;
+    }
+
+    public getBlockFromViewDirection(_fakePlayerId: FakePlayerId, maxDistance: number) {
+        this.viewBlockMaxDistances.push(maxDistance);
+        return this.viewBlockHit;
     }
 
     public getBlockInfo(_dimension: DimensionKey, position: Point): RuntimeBlockInfo | undefined {
@@ -456,7 +464,7 @@ test("automatic mine search consumes at most 256 unique block reads per tick and
         mine: {
             enabled: true,
             intervalTicks: 10,
-            direction: "front" as const,
+            direction: "down" as const,
             blockTypeId: "minecraft:diamond_ore",
             searchRadius: 10,
             approach: false,
@@ -483,7 +491,46 @@ test("automatic mine search consumes at most 256 unique block reads per tick and
     assert.equal(fixture.runtime.actions.length, 0);
 });
 
-test("automatic front mine prioritizes its horizontal plane before blocks below", () => {
+test("automatic front mine uses the block hit by the eye ray", () => {
+    const fixture = createFixture();
+    const operator = { playerId: "operator", isOperator: true };
+    const config = {
+        ...createDefaultBehaviorConfig(),
+        mine: {
+            enabled: true,
+            intervalTicks: 10,
+            direction: "front" as const,
+            blockTypeId: "minecraft:stone",
+            searchRadius: 0,
+            approach: false,
+        },
+    };
+    fixture.queries.viewBlockHit = {
+        position: { x: 2, y: 68, z: 4 },
+        face: "west",
+        distance: 5,
+    };
+    fixture.queries.blockInfoByPosition.set("2:68:4", { typeId: "minecraft:stone", solid: true });
+    fixture.queries.blockInfoByPosition.set("0:65:1", { typeId: "minecraft:stone", solid: true });
+    assert.equal(fixture.service.updateBehaviorConfig(
+        operator,
+        fixture.record.id,
+        4,
+        fixture.record.behavior,
+        config,
+    ).ok, true);
+    fixture.runtime.actions.length = 0;
+
+    assert.equal(fixture.service.tick(0).ok, true);
+    assert.deepEqual(fixture.runtime.actions.at(-1), {
+        kind: "break_block",
+        position: { x: 2, y: 68, z: 4 },
+        face: "west",
+    });
+    assert.deepEqual(fixture.queries.viewBlockMaxDistances, [7]);
+});
+
+test("automatic front mine does not fall back to nearby blocks when the eye ray misses", () => {
     const fixture = createFixture();
     const operator = { playerId: "operator", isOperator: true };
     const config = {
@@ -497,7 +544,6 @@ test("automatic front mine prioritizes its horizontal plane before blocks below"
             approach: false,
         },
     };
-    // 眼睛位于脚部 +1.62；front 方向的 origin 现在在 y=65 层。下方层为 y=64。
     fixture.queries.blockInfoByPosition.set("0:64:1", { typeId: "minecraft:stone", solid: true });
     fixture.queries.blockInfoByPosition.set("-1:65:0", { typeId: "minecraft:stone", solid: true });
     assert.equal(fixture.service.updateBehaviorConfig(
@@ -509,15 +555,13 @@ test("automatic front mine prioritizes its horizontal plane before blocks below"
     ).ok, true);
     fixture.runtime.actions.length = 0;
 
-    assert.equal(fixture.service.tick(0).ok, true);
-    assert.deepEqual(fixture.runtime.actions.at(-1), {
-        kind: "break_block",
-        position: { x: -1, y: 65, z: 0 },
-        face: "east",
-    });
+    const result = fixture.service.tick(0);
+    assert.equal(result.ok, true);
+    if (result.ok) assert.equal(result.value.blockReads, 0);
+    assert.equal(fixture.runtime.actions.length, 0);
 });
 
-test("automatic front mine falls back to the ground below its forward target", () => {
+test("automatic front mine does not look through an unmatched first ray hit", () => {
     const fixture = createFixture();
     const operator = { playerId: "operator", isOperator: true };
     const config = {
@@ -526,13 +570,18 @@ test("automatic front mine falls back to the ground below its forward target", (
             enabled: true,
             intervalTicks: 10,
             direction: "front" as const,
-            blockTypeId: "minecraft:grass_block",
+            blockTypeId: "minecraft:diamond_ore",
             searchRadius: 1,
             approach: false,
         },
     };
-    // origin 在眼睛层 y=65；下方层 y=64 的中心方块作为 fallback 目标。
-    fixture.queries.blockInfoByPosition.set("0:64:1", { typeId: "minecraft:grass_block", solid: true });
+    fixture.queries.viewBlockHit = {
+        position: { x: 0, y: 65, z: 1 },
+        face: "north",
+        distance: 1,
+    };
+    fixture.queries.blockInfoByPosition.set("0:65:1", { typeId: "minecraft:stone", solid: true });
+    fixture.queries.blockInfoByPosition.set("0:65:2", { typeId: "minecraft:diamond_ore", solid: true });
     assert.equal(fixture.service.updateBehaviorConfig(
         operator,
         fixture.record.id,
@@ -544,15 +593,14 @@ test("automatic front mine falls back to the ground below its forward target", (
 
     const result = fixture.service.tick(0);
     assert.equal(result.ok, true);
-    if (result.ok) assert.equal(result.value.blockReads, 10);
-    assert.deepEqual(fixture.runtime.actions.at(-1), {
-        kind: "break_block",
-        position: { x: 0, y: 64, z: 1 },
-        face: "north",
-    });
+    if (result.ok) {
+        assert.equal(result.value.blockReads, 1);
+        assert.match(result.value.mineDiagnostic ?? "", /observed=minecraft:stone/);
+    }
+    assert.equal(fixture.runtime.actions.length, 0);
 });
 
-test("automatic mine skips hidden search candidates when approach is disabled", () => {
+test("automatic front mine trusts the exact eye ray hit instead of recasting to the block center", () => {
     const fixture = createFixture();
     const operator = { playerId: "operator", isOperator: true };
     const config = {
@@ -566,10 +614,13 @@ test("automatic mine skips hidden search candidates when approach is disabled", 
             approach: false,
         },
     };
-    // 候选都在同一水平层 y=65；第一个被 hidden 拖拽重复，可见的替代会被选中。
-    fixture.queries.blockInfoByPosition.set("-1:65:0", { typeId: "minecraft:stone", solid: true });
-    fixture.queries.blockInfoByPosition.set("0:65:0", { typeId: "minecraft:stone", solid: true });
-    fixture.queries.hiddenBlocks.add("-1:65:0");
+    fixture.queries.viewBlockHit = {
+        position: { x: 2, y: 65, z: 2 },
+        face: "west",
+        distance: 3,
+    };
+    fixture.queries.blockInfoByPosition.set("2:65:2", { typeId: "minecraft:stone", solid: true });
+    fixture.queries.hiddenBlocks.add("2:65:2");
     assert.equal(fixture.service.updateBehaviorConfig(
         operator,
         fixture.record.id,
@@ -582,7 +633,7 @@ test("automatic mine skips hidden search candidates when approach is disabled", 
     assert.equal(fixture.service.tick(0).ok, true);
     assert.deepEqual(fixture.runtime.actions.at(-1), {
         kind: "break_block",
-        position: { x: 0, y: 65, z: 0 },
+        position: { x: 2, y: 65, z: 2 },
         face: "west",
     });
 });
@@ -602,6 +653,11 @@ test("automatic mining starts once and waits for the block to finish breaking", 
         },
     };
     fixture.queries.blockInfo = { typeId: "minecraft:stone", solid: true };
+    fixture.queries.viewBlockHit = {
+        position: { x: 0, y: 65, z: 1 },
+        face: "north",
+        distance: 1,
+    };
     assert.equal(fixture.service.updateBehaviorConfig(
         operator,
         fixture.record.id,
@@ -648,6 +704,11 @@ test("automatic mining restarts after a manual stop interrupts the active block"
         },
     };
     fixture.queries.blockInfo = { typeId: "minecraft:stone", solid: true };
+    fixture.queries.viewBlockHit = {
+        position: { x: 0, y: 65, z: 1 },
+        face: "north",
+        distance: 1,
+    };
     const updated = fixture.service.updateBehaviorConfig(
         operator,
         fixture.record.id,
@@ -683,6 +744,11 @@ test("automatic mining blocks automatic item use until the active block is broke
         use: { enabled: true, intervalTicks: 1, slot: 0 },
     };
     fixture.queries.blockInfo = { typeId: "minecraft:stone", solid: true };
+    fixture.queries.viewBlockHit = {
+        position: { x: 0, y: 65, z: 1 },
+        face: "north",
+        distance: 1,
+    };
     assert.equal(fixture.service.updateBehaviorConfig(
         operator,
         fixture.record.id,

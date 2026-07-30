@@ -1,4 +1,4 @@
-import { world } from "@minecraft/server";
+import { Direction, world } from "@minecraft/server";
 export class SapiWorldQueries {
     runtime;
     constructor(runtime) {
@@ -9,6 +9,25 @@ export class SapiWorldQueries {
     }
     isSolidBlock(dimension, position) {
         return world.getDimension(dimension).getBlock(position)?.isSolid === true;
+    }
+    getBlockFromViewDirection(fakePlayerId, maxDistance) {
+        const fakePlayer = this.runtime.getHandle(fakePlayerId);
+        if (fakePlayer === undefined)
+            return undefined;
+        const origin = fakePlayer.getHeadLocation();
+        const hit = fakePlayer.dimension.getBlockFromRay(origin, fakePlayer.getViewDirection(), { maxDistance });
+        if (hit === undefined)
+            return undefined;
+        const hitLocation = {
+            x: hit.block.location.x + hit.faceLocation.x,
+            y: hit.block.location.y + hit.faceLocation.y,
+            z: hit.block.location.z + hit.faceLocation.z,
+        };
+        return {
+            position: { ...hit.block.location },
+            face: fromDirection(hit.face),
+            distance: Math.sqrt(distanceSquared(origin, hitLocation)),
+        };
     }
     hasBlockLineOfSight(fakePlayerId, dimension, position, maxDistance) {
         const fakePlayer = this.runtime.getHandle(fakePlayerId);
@@ -121,5 +140,15 @@ function sameBlock(left, right) {
     return Math.floor(left.x) === Math.floor(right.x)
         && Math.floor(left.y) === Math.floor(right.y)
         && Math.floor(left.z) === Math.floor(right.z);
+}
+function fromDirection(direction) {
+    switch (direction) {
+        case Direction.Down: return "down";
+        case Direction.East: return "east";
+        case Direction.North: return "north";
+        case Direction.South: return "south";
+        case Direction.Up: return "up";
+        case Direction.West: return "west";
+    }
 }
 //# sourceMappingURL=worldQueries.js.map

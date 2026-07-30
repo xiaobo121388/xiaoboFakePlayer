@@ -167,9 +167,16 @@ export interface RuntimeBlockInfo {
     readonly solid: boolean;
 }
 
+export interface RuntimeBlockHit {
+    readonly position: Point;
+    readonly face: BlockFace;
+    readonly distance: number;
+}
+
 export interface WorldQueries {
     isChunkLoaded(dimension: DimensionKey, position: Point): boolean;
     isSolidBlock(dimension: DimensionKey, position: Point): boolean;
+    getBlockFromViewDirection(fakePlayerId: FakePlayerId, maxDistance: number): RuntimeBlockHit | undefined;
     hasBlockLineOfSight(
         fakePlayerId: FakePlayerId,
         dimension: DimensionKey,

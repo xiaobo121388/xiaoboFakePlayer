@@ -541,7 +541,7 @@ export class BehaviorService {
             const supportPosition = addPoints(target, candidate.offset);
             const support = this.worldQueries.getBlockInfo(runtime.dimension, supportPosition);
             blockReads += 1;
-            if (support?.solid !== true || !this.worldQueries.hasBlockLineOfSight(record.id, runtime.dimension, supportPosition, MAX_INTERACTION_DISTANCE))
+            if (support?.solid !== true)
                 continue;
             const receipt = this.executeRuntime(record.id, {
                 kind: "use_item_on_block",
@@ -561,7 +561,7 @@ export class BehaviorService {
             attempted: false,
             accepted: false,
             blockReads,
-            placeDiagnostic: describePlace(record, "no_visible_support", target, targetInfo),
+            placeDiagnostic: describePlace(record, "no_solid_support", target, targetInfo),
         };
     }
     stopFollowing(id) {

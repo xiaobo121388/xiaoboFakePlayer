@@ -20,7 +20,7 @@ import type {
     WorldStateStore,
 } from "./ports.js";
 
-const PERIODIC_CHECKPOINT_INTERVAL_TICKS = 1_200;
+const PERIODIC_CHECKPOINT_INTERVAL_TICKS = 20;
 
 export interface InventoryCheckpoint {
     readonly record: FakePlayerRecord;

@@ -94,6 +94,13 @@ export interface BehaviorConfig {
         readonly searchRadius: number;
         readonly approach: boolean;
     };
+    readonly place: {
+        readonly enabled: boolean;
+        readonly intervalTicks: number;
+        readonly mode: "front" | "position";
+        readonly position: Point | null;
+        readonly slot: number;
+    };
     readonly use: {
         readonly enabled: boolean;
         readonly intervalTicks: number;

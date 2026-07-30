@@ -530,6 +530,116 @@ test("automatic front mine uses the block hit by the eye ray", () => {
     assert.deepEqual(fixture.queries.viewBlockMaxDistances, [7]);
 });
 
+test("automatic front placement uses the exact face hit by the eye ray", () => {
+    const fixture = createFixture();
+    const operator = { playerId: "operator", isOperator: true };
+    const config = {
+        ...createDefaultBehaviorConfig(),
+        place: {
+            enabled: true,
+            intervalTicks: 10,
+            mode: "front" as const,
+            position: null,
+            slot: 4,
+        },
+    };
+    fixture.queries.viewBlockHit = {
+        position: { x: 2, y: 65, z: 2 },
+        face: "west",
+        distance: 3,
+    };
+    fixture.queries.blockInfoByPosition.set("2:65:2", { typeId: "minecraft:stone", solid: true });
+    fixture.queries.blockInfoByPosition.set("1:65:2", { typeId: "minecraft:air", solid: false });
+    assert.equal(fixture.service.updateBehaviorConfig(
+        operator,
+        fixture.record.id,
+        4,
+        fixture.record.behavior,
+        config,
+    ).ok, true);
+    fixture.runtime.actions.length = 0;
+
+    const result = fixture.service.tick(0);
+    assert.equal(result.ok, true);
+    if (result.ok) assert.equal(result.value.blockReads, 2);
+    assert.deepEqual(fixture.runtime.actions, [{
+        kind: "use_item_on_block",
+        slot: 4,
+        position: { x: 2, y: 65, z: 2 },
+        face: "west",
+    }]);
+    assert.deepEqual(fixture.queries.viewBlockMaxDistances, [7]);
+});
+
+test("automatic coordinate placement resolves the target cell to an adjacent support face", () => {
+    const fixture = createFixture();
+    const operator = { playerId: "operator", isOperator: true };
+    const config = {
+        ...createDefaultBehaviorConfig(),
+        place: {
+            enabled: true,
+            intervalTicks: 10,
+            mode: "position" as const,
+            position: { x: 3, y: 64, z: 0 },
+            slot: 2,
+        },
+    };
+    fixture.queries.blockInfoByPosition.set("3:64:0", { typeId: "minecraft:air", solid: false });
+    fixture.queries.blockInfoByPosition.set("3:63:0", { typeId: "minecraft:stone", solid: true });
+    assert.equal(fixture.service.updateBehaviorConfig(
+        operator,
+        fixture.record.id,
+        4,
+        fixture.record.behavior,
+        config,
+    ).ok, true);
+    fixture.runtime.actions.length = 0;
+
+    const result = fixture.service.tick(0);
+    assert.equal(result.ok, true);
+    if (result.ok) assert.equal(result.value.blockReads, 2);
+    assert.deepEqual(fixture.runtime.actions, [{
+        kind: "use_item_on_block",
+        slot: 2,
+        position: { x: 3, y: 63, z: 0 },
+        face: "up",
+    }]);
+});
+
+test("automatic placement skips occupied target cells and unreachable supports", () => {
+    const fixture = createFixture();
+    const operator = { playerId: "operator", isOperator: true };
+    const position = { x: 3, y: 64, z: 0 };
+    const config = {
+        ...createDefaultBehaviorConfig(),
+        place: {
+            enabled: true,
+            intervalTicks: 1,
+            mode: "position" as const,
+            position,
+            slot: 2,
+        },
+    };
+    fixture.queries.blockInfoByPosition.set("3:64:0", { typeId: "minecraft:stone", solid: true });
+    fixture.queries.blockInfoByPosition.set("3:63:0", { typeId: "minecraft:stone", solid: true });
+    assert.equal(fixture.service.updateBehaviorConfig(
+        operator,
+        fixture.record.id,
+        4,
+        fixture.record.behavior,
+        config,
+    ).ok, true);
+    fixture.runtime.actions.length = 0;
+
+    assert.equal(fixture.service.tick(0).ok, true);
+    assert.equal(fixture.runtime.actions.length, 0);
+
+    fixture.queries.blockInfoByPosition.set("3:64:0", { typeId: "minecraft:air", solid: false });
+    fixture.queries.visible = false;
+    assert.equal(fixture.service.tick(1).ok, true);
+    assert.equal(fixture.runtime.actions.length, 0);
+});
+
 test("automatic front mine does not fall back to nearby blocks when the eye ray misses", () => {
     const fixture = createFixture();
     const operator = { playerId: "operator", isOperator: true };

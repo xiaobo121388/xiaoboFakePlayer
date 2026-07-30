@@ -11,6 +11,12 @@ export const CAPABILITY_MATRIX = {
             detail: "spawnSimulatedPlayer 生命周期与稳定标签重绑定已实现。",
         },
         {
+            id: "automatic_block_placement",
+            availability: "enabled",
+            verification: "bedrock_26_33_required",
+            detail: "模拟玩家可按视线命中面或指定目标坐标，使用真实库存槽自动放置方块。",
+        },
+        {
             id: "entity_interaction_form",
             availability: "enabled",
             verification: "bedrock_26_33_required",

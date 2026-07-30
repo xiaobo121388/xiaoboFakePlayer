@@ -94,12 +94,46 @@ test("catalog codec migrates legacy behavior and skin while validating schema th
         records: { fp0001: { ...legacyRecord, behavior: createDefaultBehaviorConfig() } },
     });
     assert.deepEqual(schemaTwo?.records.fp0001?.skin, { kind: "default" });
+    const { place: _legacyPlace, ...behaviorWithoutPlace } = createDefaultBehaviorConfig();
+    const schemaThreeWithoutPlace = catalogCodec.decode(3, {
+        nextId: 2,
+        records: {
+            fp0001: {
+                ...legacyRecord,
+                behavior: behaviorWithoutPlace,
+                skin: { kind: "default" },
+            },
+        },
+    });
+    assert.deepEqual(
+        schemaThreeWithoutPlace?.records.fp0001?.behavior.place,
+        createDefaultBehaviorConfig().place,
+    );
     assert.equal(catalogCodec.decode(2, {
         nextId: 2,
         records: {
             fp0001: {
                 ...legacyRecord,
                 behavior: { ...createDefaultBehaviorConfig(), use: { enabled: true, intervalTicks: 0, slot: 0 } },
+            },
+        },
+    }), undefined);
+    assert.equal(catalogCodec.decode(3, {
+        nextId: 2,
+        records: {
+            fp0001: {
+                ...legacyRecord,
+                behavior: {
+                    ...createDefaultBehaviorConfig(),
+                    place: {
+                        enabled: true,
+                        intervalTicks: 10,
+                        mode: "position",
+                        position: null,
+                        slot: 0,
+                    },
+                },
+                skin: { kind: "default" },
             },
         },
     }), undefined);

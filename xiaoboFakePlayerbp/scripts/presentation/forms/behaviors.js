@@ -3,6 +3,7 @@ import { ActionFormData, ModalFormData } from "@minecraft/server-ui";
 import { actorIdentity, isRealPlayer } from "../playerContext.js";
 import { formBoundary, ready, sendError, t } from "./formSupport.js";
 const MINE_DIRECTIONS = ["front", "down", "up"];
+const PLACE_MODES = ["front", "position"];
 export async function openBehaviorForm(player, services, record, openDetail) {
     await formBoundary(player, `behavior:${record.id}`, async () => {
         if (!ready(player, services))
@@ -14,6 +15,7 @@ export async function openBehaviorForm(player, services, record, openDetail) {
         addBehaviorButton(form, actions, "follow", record.behavior.follow.enabled, () => openFollowForm(player, services, record, openDetail));
         addBehaviorButton(form, actions, "attack", record.behavior.attack.enabled, () => openAttackForm(player, services, record, openDetail));
         addBehaviorButton(form, actions, "mine", record.behavior.mine.enabled, () => openMineForm(player, services, record, openDetail));
+        addBehaviorButton(form, actions, "place", record.behavior.place.enabled, () => openPlaceForm(player, services, record, openDetail));
         addBehaviorButton(form, actions, "use", record.behavior.use.enabled, () => openUseForm(player, services, record, openDetail));
         form.button(t("xiaobo.fp.form.back"));
         actions.push(() => openDetail(record));
@@ -158,6 +160,42 @@ async function openUseForm(player, services, record, openDetail) {
         use: { enabled, intervalTicks: Number(intervalTicks), slot },
     }, openDetail);
 }
+async function openPlaceForm(player, services, record, openDetail) {
+    const config = record.behavior.place;
+    const response = await new ModalFormData()
+        .title(t("xiaobo.fp.form.behavior.place"))
+        .toggle(t("xiaobo.fp.form.behavior.enabled"), { defaultValue: config.enabled })
+        .textField(t("xiaobo.fp.form.behavior.interval"), "10", { defaultValue: String(config.intervalTicks) })
+        .dropdown(t("xiaobo.fp.form.behavior.place.mode"), PLACE_MODES.map((mode) => t(`xiaobo.fp.form.behavior.place.${mode}`)), { defaultValueIndex: Math.max(0, PLACE_MODES.indexOf(config.mode)) })
+        .textField(t("xiaobo.fp.form.behavior.place.x"), "0", {
+        defaultValue: config.position === null ? "" : String(config.position.x),
+    })
+        .textField(t("xiaobo.fp.form.behavior.place.y"), "64", {
+        defaultValue: config.position === null ? "" : String(config.position.y),
+    })
+        .textField(t("xiaobo.fp.form.behavior.place.z"), "0", {
+        defaultValue: config.position === null ? "" : String(config.position.z),
+    })
+        .slider(t("xiaobo.fp.form.behavior.place.slot"), 0, 35, { defaultValue: config.slot, valueStep: 1 })
+        .submitButton(t("xiaobo.fp.form.behavior.save"))
+        .show(player);
+    if (response.canceled || response.formValues === undefined || !ready(player, services))
+        return;
+    const [enabled, intervalTicks, modeIndex, x, y, z, slot] = response.formValues;
+    const mode = typeof modeIndex === "number" ? PLACE_MODES[modeIndex] : undefined;
+    if (typeof enabled !== "boolean" || mode === undefined || typeof x !== "string"
+        || typeof y !== "string" || typeof z !== "string" || typeof slot !== "number") {
+        return sendError(player, "放置行为表单数据无效。");
+    }
+    const position = parseOptionalBlockPosition(x, y, z);
+    if (position === undefined || (mode === "position" && position === null)) {
+        return sendError(player, "指定坐标模式需要完整的整数 X、Y、Z 坐标。");
+    }
+    await saveBehavior(player, services, record, {
+        ...record.behavior,
+        place: { enabled, intervalTicks: Number(intervalTicks), mode, position, slot },
+    }, openDetail);
+}
 async function saveBehavior(player, services, record, config, openDetail) {
     const result = services.behavior.updateBehaviorConfig(actorIdentity(player), record.id, record.recordRevision, record.behavior, config);
     if (!result.ok)
@@ -200,5 +238,20 @@ function followTargets(record) {
 }
 function parseIdList(value) {
     return [...new Set(value.split(",").map((entry) => entry.trim()).filter((entry) => entry.length > 0))];
+}
+function parseOptionalBlockPosition(x, y, z) {
+    const normalizedX = x.trim();
+    const normalizedY = y.trim();
+    const normalizedZ = z.trim();
+    if (normalizedX.length === 0 && normalizedY.length === 0 && normalizedZ.length === 0)
+        return null;
+    if (normalizedX.length === 0 || normalizedY.length === 0 || normalizedZ.length === 0)
+        return undefined;
+    const parsedX = Number(normalizedX);
+    const parsedY = Number(normalizedY);
+    const parsedZ = Number(normalizedZ);
+    return Number.isSafeInteger(parsedX) && Number.isSafeInteger(parsedY) && Number.isSafeInteger(parsedZ)
+        ? { x: parsedX, y: parsedY, z: parsedZ }
+        : undefined;
 }
 //# sourceMappingURL=behaviors.js.map

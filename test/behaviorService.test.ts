@@ -235,7 +235,17 @@ test("behavior actions require canSet and the current online revision", () => {
         ok: true,
         value: { accepted: true },
     });
-    assert.deepEqual(fixture.runtime.actions, [{ kind: "jump" }]);
+    assert.deepEqual(fixture.service.perform(operator, fixture.record.id, 4, {
+        kind: "set_sneaking",
+        enabled: true,
+    }), {
+        ok: true,
+        value: { accepted: true },
+    });
+    assert.deepEqual(fixture.runtime.actions, [
+        { kind: "jump" },
+        { kind: "set_sneaking", enabled: true },
+    ]);
 });
 
 test("coordinate actions reject cross-dimension and unloaded targets before runtime", () => {

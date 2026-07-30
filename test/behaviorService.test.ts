@@ -434,6 +434,26 @@ test("behavior configuration commits with optimistic record revision", () => {
     ).ok, false);
 });
 
+test("behavior configuration rejects new interaction slots outside the hotbar", () => {
+    const fixture = createFixture();
+    const operator = { playerId: "operator", isOperator: true };
+    const defaults = createDefaultBehaviorConfig();
+
+    const result = fixture.service.updateBehaviorConfig(
+        operator,
+        fixture.record.id,
+        4,
+        fixture.record.behavior,
+        {
+            ...defaults,
+            place: { ...defaults.place, slot: 9 },
+        },
+    );
+
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.error.code, "INVALID_SLOT");
+});
+
 test("enabling an action behavior disables the other action behaviors", () => {
     const fixture = createFixture();
     const operator = { playerId: "operator", isOperator: true };
@@ -991,13 +1011,40 @@ test("automatic front placement uses the exact face hit by the eye ray", () => {
         assert.match(result.value.placeDiagnostic ?? "", /state=accepted/);
     }
     assert.deepEqual(fixture.runtime.actions, [{
-        kind: "use_item_on_block",
-        slot: 4,
+        kind: "interact_block",
         position: { x: 2, y: 65, z: 2 },
         face: "west",
-        faceLocation: { x: 0, y: 0.25, z: 0.75 },
+        selection: { mode: "slot", slot: 4 },
     }]);
     assert.deepEqual(fixture.queries.viewBlockMaxDistances, [7]);
+});
+
+test("automatic interaction rejects legacy slots outside the hotbar", () => {
+    const fixture = createFixture();
+    const defaults = createDefaultBehaviorConfig();
+    const catalog = fixture.state.loadCatalog();
+    assert.equal(catalog.ok, true);
+    if (!catalog.ok) throw new Error("catalog unavailable");
+    assert.equal(fixture.state.commitCatalog(catalog.state.revision, {
+        ...catalog.state.value,
+        records: {
+            ...catalog.state.value.records,
+            [fixture.record.id]: {
+                ...fixture.record,
+                behavior: {
+                    ...defaults,
+                    place: { ...defaults.place, enabled: true, slot: 9 },
+                },
+            },
+        },
+    }).ok, true);
+    fixture.runtime.actions.length = 0;
+
+    const result = fixture.service.tick(0);
+
+    assert.equal(result.ok, true);
+    if (result.ok) assert.match(result.value.placeDiagnostic ?? "", /state=hotbar_slot_invalid/);
+    assert.equal(fixture.runtime.actions.length, 0);
 });
 
 test("automatic interaction resolves an item on every run and supports empty hand", () => {
@@ -1032,11 +1079,21 @@ test("automatic interaction resolves an item on every run and supports empty han
     fixture.runtime.actions.length = 0;
 
     assert.equal(fixture.service.tick(0).ok, true);
-    assert.equal((fixture.runtime.actions.at(-1) as { readonly slot?: number }).slot, 5);
+    assert.deepEqual(fixture.runtime.actions.at(-1), {
+        kind: "interact_block",
+        position: { x: 2, y: 65, z: 2 },
+        face: "west",
+        selection: { mode: "item", slot: 5, emptyHand: false },
+    });
     fixture.runtime.inventorySlots.delete(5);
     fixture.runtime.inventorySlots.set(8, { itemTypeId: "minecraft:stick", placeableBlock: false });
     assert.equal(fixture.service.tick(10).ok, true);
-    assert.equal((fixture.runtime.actions.at(-1) as { readonly slot?: number }).slot, 8);
+    assert.deepEqual(fixture.runtime.actions.at(-1), {
+        kind: "interact_block",
+        position: { x: 2, y: 65, z: 2 },
+        face: "west",
+        selection: { mode: "item", slot: 8, emptyHand: false },
+    });
 
     const latest = fixture.state.loadCatalog();
     assert.equal(latest.ok, true);
@@ -1060,7 +1117,7 @@ test("automatic interaction resolves an item on every run and supports empty han
         kind: "interact_block",
         position: { x: 2, y: 65, z: 2 },
         face: "west",
-        emptyHand: true,
+        selection: { mode: "item", slot: 0, emptyHand: true },
     });
 });
 
@@ -1129,11 +1186,10 @@ test("automatic front chest placement directly places only while sneaking", () =
         assert.match(result.value.placeDiagnostic ?? "", /state=accepted/);
     }
     assert.deepEqual(fixture.runtime.actions, [{
-        kind: "use_item_on_block",
-        slot: 4,
+        kind: "interact_block",
         position: { x: 2, y: 65, z: 2 },
         face: "west",
-        faceLocation: { x: 0, y: 0.25, z: 0.75 },
+        selection: { mode: "slot", slot: 4 },
     }]);
 
     const runtimePlayer = fixture.runtime.players.get(fixture.record.id);
@@ -1187,11 +1243,10 @@ test("automatic coordinate placement resolves the target cell to an adjacent sup
         assert.match(result.value.placeDiagnostic ?? "", /state=accepted/);
     }
     assert.deepEqual(fixture.runtime.actions, [{
-        kind: "use_item_on_block",
-        slot: 2,
+        kind: "interact_block",
         position: { x: 3, y: 63, z: 0 },
         face: "up",
-        faceLocation: { x: 0.5, y: 1, z: 0.5 },
+        selection: { mode: "slot", slot: 2 },
     }]);
 });
 
@@ -1263,7 +1318,7 @@ test("automatic coordinate interaction uses an empty hand on chest support", () 
         kind: "interact_block",
         position: { x: 3, y: 63, z: 0 },
         face: "up",
-        emptyHand: true,
+        selection: { mode: "item", slot: 0, emptyHand: true },
     }]);
 });
 
@@ -1304,11 +1359,10 @@ test("automatic coordinate placement delegates support reachability to the runti
     assert.equal(delegated.ok, true);
     if (delegated.ok) assert.match(delegated.value.placeDiagnostic ?? "", /state=accepted/);
     assert.deepEqual(fixture.runtime.actions, [{
-        kind: "use_item_on_block",
-        slot: 2,
+        kind: "interact_block",
         position: { x: 3, y: 63, z: 0 },
         face: "up",
-        faceLocation: { x: 0.5, y: 1, z: 0.5 },
+        selection: { mode: "slot", slot: 2 },
     }]);
 });
 

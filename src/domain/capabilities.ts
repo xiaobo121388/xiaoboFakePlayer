@@ -59,9 +59,9 @@ export const CAPABILITY_MATRIX: CapabilityMatrix = {
         },
         {
             id: "sneaking",
-            availability: "hidden_pending_game_validation",
+            availability: "enabled",
             verification: "bedrock_26_33_required",
-            detail: "精确类型可写，但发布入口等待正式版 1.26.33 实机验证。",
+            detail: "模拟玩家可通过公开的 Entity.isSneaking 属性切换潜行状态。",
         },
         {
             id: "hunger_saturation_write",

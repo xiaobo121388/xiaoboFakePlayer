@@ -287,6 +287,7 @@ function toRuntimePlayer(id, player) {
         position: player.location,
         rotation: player.getRotation(),
         gameMode: fromGameMode(player.getGameMode()),
+        isSneaking: player.isSneaking,
         selectedSlot: player.selectedSlotIndex,
         totalExperience: player.getTotalXp(),
         alive: (player.getComponent(EntityComponentTypes.Health)?.currentValue ?? 0) > 0,

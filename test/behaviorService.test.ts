@@ -45,7 +45,7 @@ class MemoryRuntime implements FakePlayerRuntime {
     }
 
     public spawn(request: SpawnFakePlayerRequest): RuntimeFakePlayer {
-        const player = { ...request, alive: true };
+        const player = { ...request, isSneaking: false, alive: true };
         this.players.set(request.id, player);
         return player;
     }
@@ -217,6 +217,7 @@ function createFixture() {
         position: record.location.position,
         rotation: record.location.rotation,
         gameMode: record.gameMode,
+        isSneaking: false,
         selectedSlot: record.selectedSlot,
         totalExperience: record.totalExperience,
         alive: true,
@@ -663,7 +664,7 @@ test("automatic front placement uses the exact face hit by the eye ray", () => {
     assert.deepEqual(fixture.queries.viewBlockMaxDistances, [7]);
 });
 
-test("automatic front placement directly places when a chest hit is not reported solid", () => {
+test("automatic front chest placement directly places only while sneaking", () => {
     const fixture = createFixture();
     const operator = { playerId: "operator", isOperator: true };
     const config = {
@@ -700,11 +701,30 @@ test("automatic front placement directly places when a chest hit is not reported
         assert.match(result.value.placeDiagnostic ?? "", /state=accepted/);
     }
     assert.deepEqual(fixture.runtime.actions, [{
+        kind: "use_item_on_block",
+        slot: 4,
+        position: { x: 2, y: 65, z: 2 },
+        face: "west",
+        faceLocation: { x: 0, y: 0.25, z: 0.75 },
+    }]);
+
+    const runtimePlayer = fixture.runtime.players.get(fixture.record.id);
+    assert.notEqual(runtimePlayer, undefined);
+    fixture.runtime.players.set(fixture.record.id, { ...runtimePlayer!, isSneaking: true });
+    fixture.runtime.actions.length = 0;
+
+    const sneakingResult = fixture.service.tick(10);
+    assert.equal(sneakingResult.ok, true);
+    if (sneakingResult.ok) {
+        assert.equal(sneakingResult.value.blockReads, 2);
+        assert.match(sneakingResult.value.placeDiagnostic ?? "", /state=accepted/);
+    }
+    assert.deepEqual(fixture.runtime.actions, [{
         kind: "place_block_direct",
         slot: 4,
         position: { x: 1, y: 65, z: 2 },
     }]);
-    assert.deepEqual(fixture.queries.viewBlockMaxDistances, [7]);
+    assert.deepEqual(fixture.queries.viewBlockMaxDistances, [7, 7]);
 });
 
 test("automatic coordinate placement resolves the target cell to an adjacent support face", () => {

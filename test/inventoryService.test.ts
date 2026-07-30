@@ -163,6 +163,7 @@ function createFixture() {
         position: { x: 3, y: 70, z: 4 },
         rotation: { x: 5, y: 90 },
         gameMode: "creative",
+        isSneaking: false,
         selectedSlot: 2,
         totalExperience: 27,
         alive: true,

@@ -660,7 +660,7 @@ test("automatic coordinate placement resolves the target cell to an adjacent sup
     }]);
 });
 
-test("automatic placement skips occupied target cells and unreachable supports", () => {
+test("automatic coordinate placement delegates support reachability to the runtime", () => {
     const fixture = createFixture();
     const operator = { playerId: "operator", isOperator: true };
     const position = { x: 3, y: 64, z: 0 };
@@ -692,10 +692,16 @@ test("automatic placement skips occupied target cells and unreachable supports",
 
     fixture.queries.blockInfoByPosition.set("3:64:0", { typeId: "minecraft:air", solid: false });
     fixture.queries.visible = false;
-    const unreachable = fixture.service.tick(1);
-    assert.equal(unreachable.ok, true);
-    if (unreachable.ok) assert.match(unreachable.value.placeDiagnostic ?? "", /state=no_visible_support/);
-    assert.equal(fixture.runtime.actions.length, 0);
+    const delegated = fixture.service.tick(1);
+    assert.equal(delegated.ok, true);
+    if (delegated.ok) assert.match(delegated.value.placeDiagnostic ?? "", /state=accepted/);
+    assert.deepEqual(fixture.runtime.actions, [{
+        kind: "use_item_on_block",
+        slot: 2,
+        position: { x: 3, y: 63, z: 0 },
+        face: "up",
+        faceLocation: { x: 0.5, y: 1, z: 0.5 },
+    }]);
 });
 
 test("automatic front mine does not fall back to nearby blocks when the eye ray misses", () => {

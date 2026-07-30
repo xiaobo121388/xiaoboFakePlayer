@@ -7,6 +7,9 @@ const MAX_INTERACTION_DISTANCE_SQUARED = MAX_INTERACTION_DISTANCE * MAX_INTERACT
 const MAX_AUTOMATIC_ACTIONS_PER_TICK = 8;
 const MAX_BLOCK_READS_PER_TICK = 256;
 const ATTACK_QUERY_LIMIT = 16;
+// 假人眼睛位于脚部之上约 1.62 格；判定"眼前方块"和破坏面方向都应以眼睛为基准，否则
+// 玩家实际看到的方块格会被算成脚部相邻格，破坏面在垂直方向上也会被误判成 up/down。
+const MINE_EYE_HEIGHT = 1.62;
 const AUTOMATIC_BEHAVIORS = ["follow", "attack", "mine", "use"];
 export class BehaviorService {
     stateStore;
@@ -299,7 +302,7 @@ export class BehaviorService {
             const receipt = this.executeRuntime(record.id, {
                 kind: "break_block",
                 position: target,
-                face: mineTargetFace(runtime.position, target),
+                face: mineTargetFace(eyePosition(runtime.position), target),
             });
             if (receipt.accepted)
                 this.activeMineTargets.set(record.id, resolved.target);
@@ -479,17 +482,26 @@ function formatPoint({ x, y, z }) {
     return `${x},${y},${z}`;
 }
 function directMineTarget(position, yaw, direction) {
-    const base = floorPoint(position);
-    if (direction === "down")
+    // down/up 与眼睛无关：向下挖脚下方块、向上挖头顶上一格。front 取"眼前"一格，
+    // 必须以眼睛所在方块格为基准，否则会落到脚部相邻层。
+    if (direction === "down") {
+        const base = floorPoint(position);
         return { x: base.x, y: base.y - 1, z: base.z };
-    if (direction === "up")
+    }
+    if (direction === "up") {
+        const base = floorPoint(position);
         return { x: base.x, y: base.y + 2, z: base.z };
+    }
+    const eyes = floorPoint(eyePosition(position));
     const radians = yaw * Math.PI / 180;
     return {
-        x: base.x + Math.round(-Math.sin(radians)),
-        y: base.y,
-        z: base.z + Math.round(Math.cos(radians)),
+        x: eyes.x + Math.round(-Math.sin(radians)),
+        y: eyes.y,
+        z: eyes.z + Math.round(Math.cos(radians)),
     };
+}
+function eyePosition(position) {
+    return { x: position.x, y: position.y + MINE_EYE_HEIGHT, z: position.z };
 }
 function nextFrontOffset(scan, maximumRadius) {
     while (scan.layer <= maximumRadius * 2) {

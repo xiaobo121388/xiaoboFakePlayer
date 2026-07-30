@@ -497,8 +497,9 @@ test("automatic front mine prioritizes its horizontal plane before blocks below"
             approach: false,
         },
     };
-    fixture.queries.blockInfoByPosition.set("0:63:1", { typeId: "minecraft:stone", solid: true });
-    fixture.queries.blockInfoByPosition.set("-1:64:0", { typeId: "minecraft:stone", solid: true });
+    // 眼睛位于脚部 +1.62；front 方向的 origin 现在在 y=65 层。下方层为 y=64。
+    fixture.queries.blockInfoByPosition.set("0:64:1", { typeId: "minecraft:stone", solid: true });
+    fixture.queries.blockInfoByPosition.set("-1:65:0", { typeId: "minecraft:stone", solid: true });
     assert.equal(fixture.service.updateBehaviorConfig(
         operator,
         fixture.record.id,
@@ -511,8 +512,8 @@ test("automatic front mine prioritizes its horizontal plane before blocks below"
     assert.equal(fixture.service.tick(0).ok, true);
     assert.deepEqual(fixture.runtime.actions.at(-1), {
         kind: "break_block",
-        position: { x: -1, y: 64, z: 0 },
-        face: "down",
+        position: { x: -1, y: 65, z: 0 },
+        face: "east",
     });
 });
 
@@ -530,7 +531,8 @@ test("automatic front mine falls back to the ground below its forward target", (
             approach: false,
         },
     };
-    fixture.queries.blockInfoByPosition.set("0:63:1", { typeId: "minecraft:grass_block", solid: true });
+    // origin 在眼睛层 y=65；下方层 y=64 的中心方块作为 fallback 目标。
+    fixture.queries.blockInfoByPosition.set("0:64:1", { typeId: "minecraft:grass_block", solid: true });
     assert.equal(fixture.service.updateBehaviorConfig(
         operator,
         fixture.record.id,
@@ -545,7 +547,7 @@ test("automatic front mine falls back to the ground below its forward target", (
     if (result.ok) assert.equal(result.value.blockReads, 10);
     assert.deepEqual(fixture.runtime.actions.at(-1), {
         kind: "break_block",
-        position: { x: 0, y: 63, z: 1 },
+        position: { x: 0, y: 64, z: 1 },
         face: "north",
     });
 });
@@ -564,9 +566,10 @@ test("automatic mine skips hidden search candidates when approach is disabled", 
             approach: false,
         },
     };
-    fixture.queries.blockInfoByPosition.set("-1:64:0", { typeId: "minecraft:stone", solid: true });
-    fixture.queries.blockInfoByPosition.set("0:64:0", { typeId: "minecraft:stone", solid: true });
-    fixture.queries.hiddenBlocks.add("-1:64:0");
+    // 候选都在同一水平层 y=65；第一个被 hidden 拖拽重复，可见的替代会被选中。
+    fixture.queries.blockInfoByPosition.set("-1:65:0", { typeId: "minecraft:stone", solid: true });
+    fixture.queries.blockInfoByPosition.set("0:65:0", { typeId: "minecraft:stone", solid: true });
+    fixture.queries.hiddenBlocks.add("-1:65:0");
     assert.equal(fixture.service.updateBehaviorConfig(
         operator,
         fixture.record.id,
@@ -579,8 +582,8 @@ test("automatic mine skips hidden search candidates when approach is disabled", 
     assert.equal(fixture.service.tick(0).ok, true);
     assert.deepEqual(fixture.runtime.actions.at(-1), {
         kind: "break_block",
-        position: { x: 0, y: 64, z: 0 },
-        face: "down",
+        position: { x: 0, y: 65, z: 0 },
+        face: "west",
     });
 });
 
@@ -610,10 +613,10 @@ test("automatic mining starts once and waits for the block to finish breaking", 
 
     const started = fixture.service.tick(0);
     assert.equal(started.ok, true);
-    if (started.ok) assert.match(started.value.mineDiagnostic ?? "", /state=starting;.*target=0,64,1/);
+    if (started.ok) assert.match(started.value.mineDiagnostic ?? "", /state=starting;.*target=0,65,1/);
     assert.deepEqual(fixture.runtime.actions.at(-1), {
         kind: "break_block",
-        position: { x: 0, y: 64, z: 1 },
+        position: { x: 0, y: 65, z: 1 },
         face: "north",
     });
     const waiting = fixture.service.tick(1);
@@ -624,7 +627,7 @@ test("automatic mining starts once and waits for the block to finish breaking", 
     fixture.service.notifyBlockBroken(
         fixture.record.id,
         "minecraft:overworld",
-        { x: 0, y: 64, z: 1 },
+        { x: 0, y: 65, z: 1 },
     );
     assert.equal(fixture.service.tick(2).ok, true);
     assert.equal(fixture.runtime.actions.filter(({ kind }) => kind === "break_block").length, 2);
@@ -695,7 +698,7 @@ test("automatic mining blocks automatic item use until the active block is broke
     fixture.service.notifyBlockBroken(
         fixture.record.id,
         "minecraft:overworld",
-        { x: 0, y: 64, z: 1 },
+        { x: 0, y: 65, z: 1 },
     );
     assert.equal(fixture.service.tick(2).ok, true);
     assert.equal(fixture.runtime.actions.at(-1)?.kind, "use_item");

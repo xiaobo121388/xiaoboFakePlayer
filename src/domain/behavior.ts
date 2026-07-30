@@ -144,7 +144,9 @@ function createDefaultPlaceConfig(): BehaviorConfig["place"] {
         intervalTicks: 10,
         mode: "front",
         position: null,
+        selectionMode: "slot",
         slot: 0,
+        itemTypeId: null,
     };
 }
 
@@ -153,13 +155,17 @@ function decodePlace(payload: unknown): BehaviorConfig["place"] | undefined {
     const position = value === undefined || value.position === null
         ? null
         : decodeBlockPosition(value.position);
+    const selectionMode = value?.selectionMode ?? "slot";
+    const itemTypeId = value?.itemTypeId ?? null;
     if (value === undefined
         || typeof value.enabled !== "boolean"
         || !isIntegerInRange(value.intervalTicks, 1, MAX_INTERVAL_TICKS)
         || !isOneOf(value.mode, ["front", "position"])
         || position === undefined
         || (value.enabled && value.mode === "position" && position === null)
-        || !isIntegerInRange(value.slot, 0, 35)) {
+        || !isOneOf(selectionMode, ["item", "slot"])
+        || !isIntegerInRange(value.slot, 0, 35)
+        || !isNullableNonEmptyString(itemTypeId)) {
         return undefined;
     }
     return {
@@ -167,7 +173,9 @@ function decodePlace(payload: unknown): BehaviorConfig["place"] | undefined {
         intervalTicks: value.intervalTicks,
         mode: value.mode,
         position,
+        selectionMode,
         slot: value.slot,
+        itemTypeId,
     };
 }
 

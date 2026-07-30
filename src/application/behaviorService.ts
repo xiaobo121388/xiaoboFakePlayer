@@ -22,6 +22,7 @@ import type {
     RuntimeActionReceipt,
     RuntimeBlockInfo,
     RuntimeFakePlayerAction,
+    RuntimeInventorySlot,
     WorldQueries,
     WorldStateStore,
 } from "./ports.js";
@@ -600,6 +601,13 @@ export class BehaviorService {
             return { ...emptyOutcome(true), placeDiagnostic: describePlace(record, "block_budget_exhausted") };
         }
         const config = record.behavior.place;
+        const inventorySlot = this.runtime.resolveInventorySlot(record.id, config.selectionMode === "slot"
+            ? { mode: "slot", slot: config.slot }
+            : { mode: "item", itemTypeId: config.itemTypeId });
+        if (inventorySlot === undefined) {
+            const state = config.itemTypeId === null ? "empty_slot_missing" : "item_not_found";
+            return { ...emptyOutcome(), placeDiagnostic: describePlace(record, state) };
+        }
         if (config.mode === "front") {
             const hit = this.worldQueries.getBlockFromViewDirection(record.id, FRONT_PLACE_RAY_DISTANCE);
             if (hit === undefined) {
@@ -621,7 +629,7 @@ export class BehaviorService {
             const target = addPoints(hit.position, faceOffset(hit.face));
             const targetInfo = this.worldQueries.getBlockInfo(runtime.dimension, target);
             const chestSupport = support !== undefined && CHEST_BLOCK_TYPE_IDS.has(support.typeId);
-            const directPlacement = chestSupport && runtime.isSneaking;
+            const directPlacement = chestSupport && runtime.isSneaking && inventorySlot.placeableBlock;
             if (support === undefined || (!chestSupport && support.solid !== true)) {
                 return {
                     attempted: false,
@@ -639,10 +647,12 @@ export class BehaviorService {
                 };
             }
             const receipt = this.executeRuntime(record.id, directPlacement
-                ? { kind: "place_block_direct", slot: config.slot, position: target }
-                : {
+                ? { kind: "place_block_direct", slot: inventorySlot.slot, position: target }
+                : inventorySlot.itemTypeId === null
+                    ? { kind: "interact_block", position: hit.position, face: hit.face, emptyHand: true }
+                    : {
                     kind: "use_item_on_block",
-                    slot: config.slot,
+                    slot: inventorySlot.slot,
                     position: hit.position,
                     face: hit.face,
                     faceLocation: hit.faceLocation,
@@ -659,6 +669,7 @@ export class BehaviorService {
                     hit.position,
                     hit.face,
                     hit.distance,
+                    inventorySlot,
                 ),
             };
         }
@@ -691,13 +702,21 @@ export class BehaviorService {
             const support = this.worldQueries.getBlockInfo(runtime.dimension, supportPosition);
             blockReads += 1;
             if (support === undefined) continue;
-            const directPlacement = CHEST_BLOCK_TYPE_IDS.has(support.typeId);
-            if (!directPlacement && support.solid !== true) continue;
+            const chestSupport = CHEST_BLOCK_TYPE_IDS.has(support.typeId);
+            const directPlacement = chestSupport && inventorySlot.placeableBlock;
+            if (!chestSupport && support.solid !== true) continue;
             const receipt = this.executeRuntime(record.id, directPlacement
-                ? { kind: "place_block_direct", slot: config.slot, position: target }
-                : {
+                ? { kind: "place_block_direct", slot: inventorySlot.slot, position: target }
+                : inventorySlot.itemTypeId === null
+                    ? {
+                        kind: "interact_block",
+                        position: supportPosition,
+                        face: candidate.face,
+                        emptyHand: true,
+                    }
+                    : {
                     kind: "use_item_on_block",
-                    slot: config.slot,
+                    slot: inventorySlot.slot,
                     position: supportPosition,
                     face: candidate.face,
                     faceLocation: faceCenter(candidate.face),
@@ -713,6 +732,8 @@ export class BehaviorService {
                     targetInfo,
                     supportPosition,
                     candidate.face,
+                    undefined,
+                    inventorySlot,
                 ),
             };
         }
@@ -842,9 +863,12 @@ function describePlace(
     support?: Point,
     face?: BlockFace,
     distance?: number,
+    inventorySlot?: RuntimeInventorySlot,
 ): string {
     const config = record.behavior.place;
-    return `id=${record.id}; state=${state}; mode=${config.mode}; slot=${config.slot}; `
+    return `id=${record.id}; state=${state}; mode=${config.mode}; selection=${config.selectionMode}; `
+        + `configured=${config.selectionMode === "slot" ? config.slot : config.itemTypeId ?? "empty"}; `
+        + `slot=${inventorySlot?.slot ?? "unresolved"}; item=${inventorySlot?.itemTypeId ?? "empty"}; `
         + `target=${target === undefined ? "unknown" : formatPoint(target)}; `
         + `targetType=${targetInfo?.typeId ?? "unknown"}; `
         + `support=${support === undefined ? "unknown" : formatPoint(support)}; `

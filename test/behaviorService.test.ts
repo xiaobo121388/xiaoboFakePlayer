@@ -15,6 +15,8 @@ import type {
     RuntimeEntityTarget,
     RuntimeFakePlayer,
     RuntimeFakePlayerAction,
+    RuntimeInventorySelection,
+    RuntimeInventorySlot,
     SpawnFakePlayerRequest,
     WorldQueries,
 } from "../src/application/ports.js";
@@ -39,6 +41,7 @@ class MemoryBackend implements StringPropertyBackend {
 class MemoryRuntime implements FakePlayerRuntime {
     public readonly players = new Map<FakePlayerId, RuntimeFakePlayer>();
     public readonly actions: RuntimeFakePlayerAction[] = [];
+    public readonly inventorySlots = new Map<number, Omit<RuntimeInventorySlot, "slot">>();
 
     public capturePlayerSkin() {
         return undefined;
@@ -56,6 +59,34 @@ class MemoryRuntime implements FakePlayerRuntime {
 
     public respawn(id: FakePlayerId, _location?: SavedLocation): boolean {
         return this.players.has(id);
+    }
+
+    public resolveInventorySlot(
+        _id: FakePlayerId,
+        selection: RuntimeInventorySelection,
+    ): RuntimeInventorySlot | undefined {
+        if (selection.mode === "slot") {
+            return {
+                slot: selection.slot,
+                ...(this.inventorySlots.get(selection.slot) ?? {
+                    itemTypeId: "minecraft:stone",
+                    placeableBlock: true,
+                }),
+            };
+        }
+        if (selection.itemTypeId === null) {
+            return { slot: 0, itemTypeId: null, placeableBlock: false };
+        }
+        for (let slot = 0; slot < 36; slot += 1) {
+            const item = this.inventorySlots.get(slot);
+            if (item?.itemTypeId === selection.itemTypeId) {
+                return {
+                    slot,
+                    ...item,
+                };
+            }
+        }
+        return undefined;
     }
 
     public perform(_id: FakePlayerId, action: RuntimeFakePlayerAction): RuntimeActionReceipt {
@@ -624,6 +655,7 @@ test("automatic front placement uses the exact face hit by the eye ray", () => {
     const config = {
         ...createDefaultBehaviorConfig(),
         place: {
+            ...createDefaultBehaviorConfig().place,
             enabled: true,
             intervalTicks: 10,
             mode: "front" as const,
@@ -664,12 +696,104 @@ test("automatic front placement uses the exact face hit by the eye ray", () => {
     assert.deepEqual(fixture.queries.viewBlockMaxDistances, [7]);
 });
 
+test("automatic interaction resolves an item on every run and supports empty hand", () => {
+    const fixture = createFixture();
+    const operator = { playerId: "operator", isOperator: true };
+    const config = {
+        ...createDefaultBehaviorConfig(),
+        place: {
+            ...createDefaultBehaviorConfig().place,
+            enabled: true,
+            intervalTicks: 10,
+            selectionMode: "item" as const,
+            itemTypeId: "minecraft:stick",
+        },
+    };
+    fixture.queries.viewBlockHit = {
+        position: { x: 2, y: 65, z: 2 },
+        face: "west",
+        faceLocation: { x: 0, y: 0.25, z: 0.75 },
+        distance: 3,
+    };
+    fixture.queries.blockInfoByPosition.set("2:65:2", { typeId: "minecraft:stone", solid: true });
+    fixture.queries.blockInfoByPosition.set("1:65:2", { typeId: "minecraft:air", solid: false });
+    fixture.runtime.inventorySlots.set(5, { itemTypeId: "minecraft:stick", placeableBlock: false });
+    assert.equal(fixture.service.updateBehaviorConfig(
+        operator,
+        fixture.record.id,
+        4,
+        fixture.record.behavior,
+        config,
+    ).ok, true);
+    fixture.runtime.actions.length = 0;
+
+    assert.equal(fixture.service.tick(0).ok, true);
+    assert.equal((fixture.runtime.actions.at(-1) as { readonly slot?: number }).slot, 5);
+    fixture.runtime.inventorySlots.delete(5);
+    fixture.runtime.inventorySlots.set(8, { itemTypeId: "minecraft:stick", placeableBlock: false });
+    assert.equal(fixture.service.tick(10).ok, true);
+    assert.equal((fixture.runtime.actions.at(-1) as { readonly slot?: number }).slot, 8);
+
+    const latest = fixture.state.loadCatalog();
+    assert.equal(latest.ok, true);
+    if (!latest.ok) throw new Error("catalog unavailable");
+    const current = latest.state.value.records[fixture.record.id];
+    assert.notEqual(current, undefined);
+    const emptyHand = fixture.service.updateBehaviorConfig(
+        operator,
+        fixture.record.id,
+        current!.recordRevision,
+        current!.behavior,
+        {
+            ...current!.behavior,
+            place: { ...current!.behavior.place, itemTypeId: null },
+        },
+    );
+    assert.equal(emptyHand.ok, true);
+    fixture.runtime.actions.length = 0;
+    assert.equal(fixture.service.tick(20).ok, true);
+    assert.deepEqual(fixture.runtime.actions.at(-1), {
+        kind: "interact_block",
+        position: { x: 2, y: 65, z: 2 },
+        face: "west",
+        emptyHand: true,
+    });
+});
+
+test("automatic interaction skips the action when the configured item is missing", () => {
+    const fixture = createFixture();
+    const operator = { playerId: "operator", isOperator: true };
+    const defaults = createDefaultBehaviorConfig();
+    assert.equal(fixture.service.updateBehaviorConfig(
+        operator,
+        fixture.record.id,
+        4,
+        fixture.record.behavior,
+        {
+            ...defaults,
+            place: {
+                ...defaults.place,
+                enabled: true,
+                selectionMode: "item",
+                itemTypeId: "minecraft:stick",
+            },
+        },
+    ).ok, true);
+    fixture.runtime.actions.length = 0;
+
+    const result = fixture.service.tick(0);
+    assert.equal(result.ok, true);
+    if (result.ok) assert.match(result.value.placeDiagnostic ?? "", /state=item_not_found/);
+    assert.equal(fixture.runtime.actions.length, 0);
+});
+
 test("automatic front chest placement directly places only while sneaking", () => {
     const fixture = createFixture();
     const operator = { playerId: "operator", isOperator: true };
     const config = {
         ...createDefaultBehaviorConfig(),
         place: {
+            ...createDefaultBehaviorConfig().place,
             enabled: true,
             intervalTicks: 10,
             mode: "front" as const,
@@ -733,6 +857,7 @@ test("automatic coordinate placement resolves the target cell to an adjacent sup
     const config = {
         ...createDefaultBehaviorConfig(),
         place: {
+            ...createDefaultBehaviorConfig().place,
             enabled: true,
             intervalTicks: 10,
             mode: "position" as const,
@@ -772,6 +897,7 @@ test("automatic coordinate placement directly places when a chest support is not
     const config = {
         ...createDefaultBehaviorConfig(),
         place: {
+            ...createDefaultBehaviorConfig().place,
             enabled: true,
             intervalTicks: 10,
             mode: "position" as const,
@@ -803,6 +929,40 @@ test("automatic coordinate placement directly places when a chest support is not
     }]);
 });
 
+test("automatic coordinate interaction uses an empty hand on chest support", () => {
+    const fixture = createFixture();
+    const operator = { playerId: "operator", isOperator: true };
+    const defaults = createDefaultBehaviorConfig();
+    fixture.queries.blockInfoByPosition.set("3:64:0", { typeId: "minecraft:air", solid: false });
+    fixture.queries.blockInfoByPosition.set("3:63:0", { typeId: "minecraft:chest", solid: false });
+    assert.equal(fixture.service.updateBehaviorConfig(
+        operator,
+        fixture.record.id,
+        4,
+        fixture.record.behavior,
+        {
+            ...defaults,
+            place: {
+                ...defaults.place,
+                enabled: true,
+                mode: "position",
+                position: { x: 3, y: 64, z: 0 },
+                selectionMode: "item",
+                itemTypeId: null,
+            },
+        },
+    ).ok, true);
+    fixture.runtime.actions.length = 0;
+
+    assert.equal(fixture.service.tick(0).ok, true);
+    assert.deepEqual(fixture.runtime.actions, [{
+        kind: "interact_block",
+        position: { x: 3, y: 63, z: 0 },
+        face: "up",
+        emptyHand: true,
+    }]);
+});
+
 test("automatic coordinate placement delegates support reachability to the runtime", () => {
     const fixture = createFixture();
     const operator = { playerId: "operator", isOperator: true };
@@ -810,6 +970,7 @@ test("automatic coordinate placement delegates support reachability to the runti
     const config = {
         ...createDefaultBehaviorConfig(),
         place: {
+            ...createDefaultBehaviorConfig().place,
             enabled: true,
             intervalTicks: 1,
             mode: "position" as const,

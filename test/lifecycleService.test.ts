@@ -97,6 +97,10 @@ class MemoryRuntime implements FakePlayerRuntime {
         return true;
     }
 
+    public resolveInventorySlot() {
+        return undefined;
+    }
+
     public perform(_id: FakePlayerId, _action: RuntimeFakePlayerAction): RuntimeActionReceipt {
         return { accepted: true };
     }
@@ -146,6 +150,10 @@ class MemorySnapshots implements InventorySnapshotStore {
 class MemoryInventoryAccess implements InventoryAccess {
     public readLiveOverview() {
         return ok([]);
+    }
+
+    public getPlayerMainhandItemTypeId() {
+        return ok(null);
     }
 
     public readonly states = new Map<string, InventoryImageState>();

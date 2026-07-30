@@ -20,6 +20,12 @@ export class InventoryService {
     markDirty(id) {
         this.dirty.add(id);
     }
+    getPlayerMainhandItemTypeId(actor) {
+        const authorization = this.authorize(actor);
+        return authorization.ok
+            ? this.access.getPlayerMainhandItemTypeId(actor.playerId)
+            : authorization;
+    }
     getOverview(actor, id, expectedRecordRevision) {
         const authorization = this.authorize(actor);
         if (!authorization.ok)

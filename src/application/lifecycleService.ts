@@ -181,6 +181,9 @@ export class LifecycleService {
                 verified.value,
             );
             if (!verifiedCommit.ok) return verifiedCommit;
+            if (!this.runtime.disconnect(id)) {
+                return err("CONFLICT", `无法断开待下线假人 ${id}。`);
+            }
             const offline = transitionLifecycle(verified.value, verified.value.recordRevision, { kind: "offline" });
             if (!offline.ok) return offline;
             const fallbackRevision = availableInventoryFallbackRevision(this.snapshots, context.value.record);
@@ -203,7 +206,6 @@ export class LifecycleService {
                 );
                 if (!removed.ok) return removed;
             }
-            this.runtime.disconnect(id);
             return ok(committed.value.record);
         } finally {
             lease.value.release();

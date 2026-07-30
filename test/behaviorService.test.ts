@@ -19,7 +19,7 @@ import type {
     WorldQueries,
 } from "../src/application/ports.js";
 import { createDefaultBehaviorConfig } from "../src/domain/behavior.js";
-import type { DimensionKey, FakePlayerId, Point, SavedLocation } from "../src/domain/model.js";
+import type { BehaviorConfig, DimensionKey, FakePlayerId, Point, SavedLocation } from "../src/domain/model.js";
 import { ok, type Result } from "../src/domain/results.js";
 import type { StringPropertyBackend } from "../src/infrastructure/state/bankedJsonStore.js";
 import { BankedWorldStateStore } from "../src/infrastructure/state/bankedWorldStateStore.js";
@@ -373,6 +373,37 @@ test("behavior configuration commits with optimistic record revision", () => {
         fixture.record.behavior,
         config,
     ).ok, false);
+});
+
+test("enabling an action behavior disables the other action behaviors", () => {
+    const fixture = createFixture();
+    const operator = { playerId: "operator", isOperator: true };
+    const kinds = ["attack", "mine", "place", "use"] as const;
+    const enableActions: readonly ((config: BehaviorConfig) => BehaviorConfig)[] = [
+        (config) => ({ ...config, attack: { ...config.attack, enabled: true } }),
+        (config) => ({ ...config, mine: { ...config.mine, enabled: true } }),
+        (config) => ({ ...config, place: { ...config.place, enabled: true } }),
+        (config) => ({ ...config, use: { ...config.use, enabled: true } }),
+    ];
+    let revision = fixture.record.recordRevision;
+    let behavior = fixture.record.behavior;
+
+    for (const [index, enable] of enableActions.entries()) {
+        const updated = fixture.service.updateBehaviorConfig(
+            operator,
+            fixture.record.id,
+            revision,
+            behavior,
+            enable(behavior),
+        );
+        assert.equal(updated.ok, true);
+        if (!updated.ok) throw new Error("behavior update failed");
+        revision = updated.value.recordRevision;
+        behavior = updated.value.behavior;
+        for (const kind of kinds) {
+            assert.equal(behavior[kind].enabled, kind === kinds[index]);
+        }
+    }
 });
 
 test("behavior configuration tolerates checkpoint-only revision advances", () => {
@@ -916,10 +947,10 @@ test("automatic mining restarts after a manual stop interrupts the active block"
     assert.equal(fixture.runtime.actions.filter(({ kind }) => kind === "break_block").length, 2);
 });
 
-test("automatic mining blocks automatic item use until the active block is broken", () => {
+test("enabling automatic item use stops and disables active mining", () => {
     const fixture = createFixture();
     const operator = { playerId: "operator", isOperator: true };
-    const config = {
+    const mineConfig = {
         ...createDefaultBehaviorConfig(),
         mine: {
             enabled: true,
@@ -929,7 +960,6 @@ test("automatic mining blocks automatic item use until the active block is broke
             searchRadius: 0,
             approach: false,
         },
-        use: { enabled: true, intervalTicks: 1, slot: 0 },
     };
     fixture.queries.blockInfo = { typeId: "minecraft:stone", solid: true };
     fixture.queries.viewBlockHit = {
@@ -938,25 +968,37 @@ test("automatic mining blocks automatic item use until the active block is broke
         faceLocation: { x: 0.5, y: 0.5, z: 0 },
         distance: 1,
     };
-    assert.equal(fixture.service.updateBehaviorConfig(
+    const mining = fixture.service.updateBehaviorConfig(
         operator,
         fixture.record.id,
         4,
         fixture.record.behavior,
-        config,
-    ).ok, true);
+        mineConfig,
+    );
+    assert.equal(mining.ok, true);
+    if (!mining.ok) throw new Error("behavior update failed");
     fixture.runtime.actions.length = 0;
 
     assert.equal(fixture.service.tick(0).ok, true);
-    assert.equal(fixture.service.tick(1).ok, true);
     assert.deepEqual(fixture.runtime.actions.map(({ kind }) => kind), ["break_block"]);
-    fixture.service.notifyBlockBroken(
+
+    const using = fixture.service.updateBehaviorConfig(
+        operator,
         fixture.record.id,
-        "minecraft:overworld",
-        { x: 0, y: 65, z: 1 },
+        mining.value.recordRevision,
+        mining.value.behavior,
+        {
+            ...mining.value.behavior,
+            use: { enabled: true, intervalTicks: 1, slot: 0 },
+        },
     );
-    assert.equal(fixture.service.tick(2).ok, true);
-    assert.equal(fixture.runtime.actions.at(-1)?.kind, "use_item");
-    assert.equal(fixture.service.tick(3).ok, true);
-    assert.equal(fixture.runtime.actions.filter(({ kind }) => kind === "break_block").length, 2);
+    assert.equal(using.ok, true);
+    if (!using.ok) throw new Error("behavior update failed");
+    assert.equal(using.value.behavior.mine.enabled, false);
+    assert.equal(using.value.behavior.use.enabled, true);
+    assert.deepEqual(fixture.runtime.actions.map(({ kind }) => kind), ["break_block", "stop"]);
+
+    fixture.runtime.actions.length = 0;
+    assert.equal(fixture.service.tick(1).ok, true);
+    assert.deepEqual(fixture.runtime.actions.map(({ kind }) => kind), ["use_item"]);
 });

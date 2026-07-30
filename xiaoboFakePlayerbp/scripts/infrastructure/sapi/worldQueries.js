@@ -26,6 +26,7 @@ export class SapiWorldQueries {
         return {
             position: { ...hit.block.location },
             face: fromDirection(hit.face),
+            faceLocation: { ...hit.faceLocation },
             distance: Math.sqrt(distanceSquared(origin, hitLocation)),
         };
     }

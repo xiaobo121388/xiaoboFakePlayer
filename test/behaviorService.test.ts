@@ -552,6 +552,7 @@ test("automatic front mine uses the block hit by the eye ray", () => {
     fixture.queries.viewBlockHit = {
         position: { x: 2, y: 68, z: 4 },
         face: "west",
+        faceLocation: { x: 0, y: 0.5, z: 0.5 },
         distance: 5,
     };
     fixture.queries.blockInfoByPosition.set("2:68:4", { typeId: "minecraft:stone", solid: true });
@@ -590,6 +591,7 @@ test("automatic front placement uses the exact face hit by the eye ray", () => {
     fixture.queries.viewBlockHit = {
         position: { x: 2, y: 65, z: 2 },
         face: "west",
+        faceLocation: { x: 0, y: 0.25, z: 0.75 },
         distance: 3,
     };
     fixture.queries.blockInfoByPosition.set("2:65:2", { typeId: "minecraft:stone", solid: true });
@@ -605,12 +607,16 @@ test("automatic front placement uses the exact face hit by the eye ray", () => {
 
     const result = fixture.service.tick(0);
     assert.equal(result.ok, true);
-    if (result.ok) assert.equal(result.value.blockReads, 2);
+    if (result.ok) {
+        assert.equal(result.value.blockReads, 2);
+        assert.match(result.value.placeDiagnostic ?? "", /state=accepted/);
+    }
     assert.deepEqual(fixture.runtime.actions, [{
         kind: "use_item_on_block",
         slot: 4,
         position: { x: 2, y: 65, z: 2 },
         face: "west",
+        faceLocation: { x: 0, y: 0.25, z: 0.75 },
     }]);
     assert.deepEqual(fixture.queries.viewBlockMaxDistances, [7]);
 });
@@ -641,12 +647,16 @@ test("automatic coordinate placement resolves the target cell to an adjacent sup
 
     const result = fixture.service.tick(0);
     assert.equal(result.ok, true);
-    if (result.ok) assert.equal(result.value.blockReads, 2);
+    if (result.ok) {
+        assert.equal(result.value.blockReads, 2);
+        assert.match(result.value.placeDiagnostic ?? "", /state=accepted/);
+    }
     assert.deepEqual(fixture.runtime.actions, [{
         kind: "use_item_on_block",
         slot: 2,
         position: { x: 3, y: 63, z: 0 },
         face: "up",
+        faceLocation: { x: 0.5, y: 1, z: 0.5 },
     }]);
 });
 
@@ -675,12 +685,16 @@ test("automatic placement skips occupied target cells and unreachable supports",
     ).ok, true);
     fixture.runtime.actions.length = 0;
 
-    assert.equal(fixture.service.tick(0).ok, true);
+    const occupied = fixture.service.tick(0);
+    assert.equal(occupied.ok, true);
+    if (occupied.ok) assert.match(occupied.value.placeDiagnostic ?? "", /state=target_not_air/);
     assert.equal(fixture.runtime.actions.length, 0);
 
     fixture.queries.blockInfoByPosition.set("3:64:0", { typeId: "minecraft:air", solid: false });
     fixture.queries.visible = false;
-    assert.equal(fixture.service.tick(1).ok, true);
+    const unreachable = fixture.service.tick(1);
+    assert.equal(unreachable.ok, true);
+    if (unreachable.ok) assert.match(unreachable.value.placeDiagnostic ?? "", /state=no_visible_support/);
     assert.equal(fixture.runtime.actions.length, 0);
 });
 
@@ -732,6 +746,7 @@ test("automatic front mine does not look through an unmatched first ray hit", ()
     fixture.queries.viewBlockHit = {
         position: { x: 0, y: 65, z: 1 },
         face: "north",
+        faceLocation: { x: 0.5, y: 0.5, z: 0 },
         distance: 1,
     };
     fixture.queries.blockInfoByPosition.set("0:65:1", { typeId: "minecraft:stone", solid: true });
@@ -771,6 +786,7 @@ test("automatic front mine trusts the exact eye ray hit instead of recasting to 
     fixture.queries.viewBlockHit = {
         position: { x: 2, y: 65, z: 2 },
         face: "west",
+        faceLocation: { x: 0, y: 0.5, z: 0.5 },
         distance: 3,
     };
     fixture.queries.blockInfoByPosition.set("2:65:2", { typeId: "minecraft:stone", solid: true });
@@ -810,6 +826,7 @@ test("automatic mining starts once and waits for the block to finish breaking", 
     fixture.queries.viewBlockHit = {
         position: { x: 0, y: 65, z: 1 },
         face: "north",
+        faceLocation: { x: 0.5, y: 0.5, z: 0 },
         distance: 1,
     };
     assert.equal(fixture.service.updateBehaviorConfig(
@@ -861,6 +878,7 @@ test("automatic mining restarts after a manual stop interrupts the active block"
     fixture.queries.viewBlockHit = {
         position: { x: 0, y: 65, z: 1 },
         face: "north",
+        faceLocation: { x: 0.5, y: 0.5, z: 0 },
         distance: 1,
     };
     const updated = fixture.service.updateBehaviorConfig(
@@ -901,6 +919,7 @@ test("automatic mining blocks automatic item use until the active block is broke
     fixture.queries.viewBlockHit = {
         position: { x: 0, y: 65, z: 1 },
         face: "north",
+        faceLocation: { x: 0.5, y: 0.5, z: 0 },
         distance: 1,
     };
     assert.equal(fixture.service.updateBehaviorConfig(

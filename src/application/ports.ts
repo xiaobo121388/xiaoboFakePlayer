@@ -83,6 +83,7 @@ export type RuntimeFakePlayerAction =
         readonly slot: number;
         readonly position: Point;
         readonly face: BlockFace;
+        readonly faceLocation: Point;
     };
 
 export interface RuntimeActionReceipt {
@@ -175,6 +176,7 @@ export interface RuntimeBlockInfo {
 export interface RuntimeBlockHit {
     readonly position: Point;
     readonly face: BlockFace;
+    readonly faceLocation: Point;
     readonly distance: number;
 }
 

@@ -497,7 +497,177 @@ test("behavior configuration tolerates checkpoint-only revision advances", () =>
     }
 });
 
-test("automatic follow and attack share a fair per-player action slot and honor cooldowns", () => {
+test("one-shot navigation pauses automatic pathfinding until the destination is reached", () => {
+    const fixture = createFixture();
+    const operator = { playerId: "operator", isOperator: true };
+    const config = {
+        ...createDefaultBehaviorConfig(),
+        attack: {
+            enabled: true,
+            intervalTicks: 2,
+            maxDistance: 12,
+            targetFamilies: ["monster"],
+            targetTypeIds: [],
+            chase: true,
+        },
+    };
+    assert.equal(fixture.service.updateBehaviorConfig(
+        operator,
+        fixture.record.id,
+        4,
+        fixture.record.behavior,
+        config,
+    ).ok, true);
+    fixture.runtime.actions.length = 0;
+    fixture.queries.attackTargets = [{
+        id: "zombie-runtime",
+        dimension: "minecraft:overworld",
+        position: { x: 10, y: 64, z: 0 },
+    }];
+
+    assert.equal(fixture.service.perform(operator, fixture.record.id, 5, {
+        kind: "navigate",
+        dimension: "minecraft:overworld",
+        position: { x: 20, y: 64, z: 0 },
+        speed: 0.75,
+    }).ok, true);
+    assert.equal(fixture.service.tick(0).ok, true);
+    assert.deepEqual(fixture.runtime.actions, [{
+        kind: "navigate",
+        position: { x: 20, y: 64, z: 0 },
+        speed: 0.75,
+    }]);
+
+    fixture.runtime.players.set(fixture.record.id, {
+        ...fixture.runtime.players.get(fixture.record.id)!,
+        position: { x: 20, y: 64, z: 0 },
+    });
+    assert.equal(fixture.service.tick(1).ok, true);
+    assert.equal(fixture.runtime.actions.at(-1)?.kind, "navigate_entity");
+});
+
+test("stalled one-shot navigation releases automatic pathfinding", () => {
+    const fixture = createFixture();
+    const operator = { playerId: "operator", isOperator: true };
+    const config = {
+        ...createDefaultBehaviorConfig(),
+        attack: {
+            enabled: true,
+            intervalTicks: 2,
+            maxDistance: 12,
+            targetFamilies: ["monster"],
+            targetTypeIds: [],
+            chase: true,
+        },
+    };
+    assert.equal(fixture.service.updateBehaviorConfig(
+        operator,
+        fixture.record.id,
+        4,
+        fixture.record.behavior,
+        config,
+    ).ok, true);
+    fixture.runtime.actions.length = 0;
+    fixture.queries.attackTargets = [{
+        id: "zombie-runtime",
+        dimension: "minecraft:overworld",
+        position: { x: 10, y: 64, z: 0 },
+    }];
+    assert.equal(fixture.service.perform(operator, fixture.record.id, 5, {
+        kind: "navigate",
+        dimension: "minecraft:overworld",
+        position: { x: 20, y: 64, z: 0 },
+    }).ok, true);
+
+    for (let currentTick = 0; currentTick < 19; currentTick += 1) {
+        assert.equal(fixture.service.tick(currentTick).ok, true);
+    }
+    assert.equal(fixture.runtime.actions.length, 1);
+    assert.equal(fixture.service.tick(19).ok, true);
+    assert.equal(fixture.runtime.actions.at(-1)?.kind, "navigate_entity");
+});
+
+test("one-shot entity navigation releases when its target becomes invalid", () => {
+    const fixture = createFixture();
+    const operator = { playerId: "operator", isOperator: true };
+    const config = {
+        ...createDefaultBehaviorConfig(),
+        attack: {
+            enabled: true,
+            intervalTicks: 2,
+            maxDistance: 12,
+            targetFamilies: ["monster"],
+            targetTypeIds: [],
+            chase: true,
+        },
+    };
+    assert.equal(fixture.service.updateBehaviorConfig(
+        operator,
+        fixture.record.id,
+        4,
+        fixture.record.behavior,
+        config,
+    ).ok, true);
+    fixture.runtime.actions.length = 0;
+    fixture.queries.entityDistanceSquared = 100;
+    assert.equal(fixture.service.perform(operator, fixture.record.id, 5, {
+        kind: "navigate_entity",
+        targetId: "manual-target",
+    }).ok, true);
+    fixture.queries.entityDistanceSquared = undefined;
+    fixture.queries.attackTargets = [{
+        id: "zombie-runtime",
+        dimension: "minecraft:overworld",
+        position: { x: 10, y: 64, z: 0 },
+    }];
+
+    assert.equal(fixture.service.tick(0).ok, true);
+    assert.deepEqual(fixture.runtime.actions.at(-1), {
+        kind: "navigate_entity",
+        targetId: "zombie-runtime",
+        speed: 1,
+    });
+});
+
+test("manual stop releases one-shot navigation immediately", () => {
+    const fixture = createFixture();
+    const operator = { playerId: "operator", isOperator: true };
+    const config = {
+        ...createDefaultBehaviorConfig(),
+        attack: {
+            enabled: true,
+            intervalTicks: 2,
+            maxDistance: 12,
+            targetFamilies: ["monster"],
+            targetTypeIds: [],
+            chase: true,
+        },
+    };
+    assert.equal(fixture.service.updateBehaviorConfig(
+        operator,
+        fixture.record.id,
+        4,
+        fixture.record.behavior,
+        config,
+    ).ok, true);
+    fixture.runtime.actions.length = 0;
+    fixture.queries.attackTargets = [{
+        id: "zombie-runtime",
+        dimension: "minecraft:overworld",
+        position: { x: 10, y: 64, z: 0 },
+    }];
+    assert.equal(fixture.service.perform(operator, fixture.record.id, 5, {
+        kind: "navigate",
+        dimension: "minecraft:overworld",
+        position: { x: 20, y: 64, z: 0 },
+    }).ok, true);
+    assert.equal(fixture.service.perform(operator, fixture.record.id, 5, { kind: "stop" }).ok, true);
+
+    assert.equal(fixture.service.tick(0).ok, true);
+    assert.equal(fixture.runtime.actions.at(-1)?.kind, "navigate_entity");
+});
+
+test("distant follow pathfinding takes priority over other automatic pathfinding", () => {
     const fixture = createFixture();
     const operator = { playerId: "operator", isOperator: true };
     const config = {
@@ -513,10 +683,10 @@ test("automatic follow and attack share a fair per-player action slot and honor 
         attack: {
             enabled: true,
             intervalTicks: 2,
-            maxDistance: 6,
+            maxDistance: 12,
             targetFamilies: ["monster"],
             targetTypeIds: [],
-            chase: false,
+            chase: true,
         },
     };
     assert.equal(fixture.service.updateBehaviorConfig(
@@ -535,7 +705,7 @@ test("automatic follow and attack share a fair per-player action slot and honor 
     fixture.queries.attackTargets = [{
         id: "zombie-runtime",
         dimension: "minecraft:overworld",
-        position: { x: 2, y: 64, z: 0 },
+        position: { x: 10, y: 64, z: 0 },
     }];
 
     assert.equal(fixture.service.tick(0).ok, true);
@@ -545,15 +715,123 @@ test("automatic follow and attack share a fair per-player action slot and honor 
         speed: 0.8,
     }]);
     assert.equal(fixture.service.tick(1).ok, true);
-    assert.equal(fixture.runtime.actions.at(-1)?.kind, "attack_entity");
-    assert.equal(fixture.runtime.actions.length, 2);
+    assert.equal(fixture.runtime.actions.at(-1)?.kind, "navigate_entity");
+    assert.equal(fixture.runtime.actions.length, 1);
     assert.equal(fixture.service.tick(2).ok, true);
-    assert.equal(fixture.runtime.actions.length, 2);
+    assert.equal(fixture.runtime.actions.length, 1);
     assert.equal(fixture.service.tick(3).ok, true);
-    assert.equal(fixture.runtime.actions.length, 3);
-    assert.equal(fixture.runtime.actions.at(-1)?.kind, "attack_entity");
+    assert.equal(fixture.runtime.actions.length, 1);
     assert.equal(fixture.service.tick(10).ok, true);
     assert.equal(fixture.runtime.actions.at(-1)?.kind, "navigate_entity");
+    assert.equal(fixture.runtime.actions.length, 2);
+});
+
+test("follow within its distance yields to other automatic pathfinding", () => {
+    const fixture = createFixture();
+    const operator = { playerId: "operator", isOperator: true };
+    const config = {
+        ...createDefaultBehaviorConfig(),
+        follow: {
+            enabled: true,
+            targetPlayerId: "playfab-target",
+            lastKnownName: "Steve",
+            intervalTicks: 10,
+            speed: 0.8,
+            stopDistance: 4,
+        },
+        attack: {
+            enabled: true,
+            intervalTicks: 2,
+            maxDistance: 6,
+            targetFamilies: ["monster"],
+            targetTypeIds: [],
+            chase: true,
+        },
+    };
+    assert.equal(fixture.service.updateBehaviorConfig(
+        operator,
+        fixture.record.id,
+        4,
+        fixture.record.behavior,
+        config,
+    ).ok, true);
+    fixture.runtime.actions.length = 0;
+    fixture.queries.onlinePlayers.set("playfab-target", {
+        id: "player-runtime",
+        dimension: "minecraft:overworld",
+        position: { x: 3, y: 64, z: 0 },
+    });
+    fixture.queries.attackTargets = [{
+        id: "zombie-runtime",
+        dimension: "minecraft:overworld",
+        position: { x: 5, y: 64, z: 0 },
+    }];
+
+    assert.equal(fixture.service.tick(0).ok, true);
+    assert.deepEqual(fixture.runtime.actions, [{
+        kind: "attack_entity",
+        targetId: "zombie-runtime",
+    }]);
+});
+
+test("follow yields to mining pathfinding only within its configured distance", () => {
+    const fixture = createFixture();
+    const operator = { playerId: "operator", isOperator: true };
+    const config = {
+        ...createDefaultBehaviorConfig(),
+        follow: {
+            enabled: true,
+            targetPlayerId: "playfab-target",
+            lastKnownName: "Steve",
+            intervalTicks: 10,
+            speed: 0.8,
+            stopDistance: 4,
+        },
+        mine: {
+            enabled: true,
+            intervalTicks: 10,
+            direction: "down" as const,
+            blockTypeId: "minecraft:stone",
+            searchRadius: 0,
+            approach: true,
+        },
+    };
+    assert.equal(fixture.service.updateBehaviorConfig(
+        operator,
+        fixture.record.id,
+        4,
+        fixture.record.behavior,
+        config,
+    ).ok, true);
+    fixture.runtime.actions.length = 0;
+    fixture.queries.visible = false;
+    fixture.queries.blockInfoByPosition.set("0:63:0", { typeId: "minecraft:stone", solid: true });
+    fixture.queries.onlinePlayers.set("playfab-target", {
+        id: "player-runtime",
+        dimension: "minecraft:overworld",
+        position: { x: 10, y: 64, z: 0 },
+    });
+
+    assert.equal(fixture.service.tick(0).ok, true);
+    assert.deepEqual(fixture.runtime.actions, [{
+        kind: "navigate_entity",
+        targetId: "player-runtime",
+        speed: 0.8,
+    }]);
+    assert.equal(fixture.service.tick(1).ok, true);
+    assert.equal(fixture.runtime.actions.length, 1);
+
+    fixture.queries.onlinePlayers.set("playfab-target", {
+        id: "player-runtime",
+        dimension: "minecraft:overworld",
+        position: { x: 3, y: 64, z: 0 },
+    });
+    assert.equal(fixture.service.tick(2).ok, true);
+    assert.deepEqual(fixture.runtime.actions.at(-1), {
+        kind: "navigate",
+        position: { x: 0.5, y: 64, z: 0.5 },
+        speed: 1,
+    });
 });
 
 test("automatic behaviors pause while a transfer is pending", () => {

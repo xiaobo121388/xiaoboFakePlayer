@@ -7,6 +7,10 @@ const MAX_INTERACTION_DISTANCE_SQUARED = MAX_INTERACTION_DISTANCE * MAX_INTERACT
 const MAX_AUTOMATIC_ACTIONS_PER_TICK = 8;
 const MAX_BLOCK_READS_PER_TICK = 256;
 const ATTACK_QUERY_LIMIT = 16;
+const ONE_SHOT_NAVIGATION_ARRIVAL_DISTANCE_SQUARED = 1;
+// 公开 API 不暴露导航状态；连续 20 tick 未移动 0.1 格时按引擎已因卡住停止处理。
+const ONE_SHOT_NAVIGATION_PROGRESS_DISTANCE_SQUARED = 0.01;
+const ONE_SHOT_NAVIGATION_STALL_TICKS = 20;
 // 挂机假人的“面前”语义是眼睛视线 7 格内的首个方块命中。
 const FRONT_MINE_RAY_DISTANCE = 7;
 const FRONT_PLACE_RAY_DISTANCE = 7;
@@ -37,6 +41,7 @@ export class BehaviorService {
     mineScans = new Map();
     mineTargets = new Map();
     activeMineTargets = new Map();
+    oneShotNavigations = new Map();
     lastTaskKey;
     constructor(stateStore, runtime, worldQueries, coordinator, inventory) {
         this.stateStore = stateStore;
@@ -79,6 +84,8 @@ export class BehaviorService {
             return lease;
         try {
             const receipt = this.executeRuntime(id, mapped.value);
+            if (receipt.accepted)
+                this.recordOneShotNavigation(id, mapped.value, runtime);
             return receipt.accepted
                 ? ok(receipt)
                 : err("CONFLICT", `假人 ${id} 未接受 ${action.kind} 动作。`);
@@ -168,11 +175,19 @@ export class BehaviorService {
             ...Object.values(operations.state.value.inventoryTransfers).map((transfer) => transfer.fakePlayerId),
             ...Object.values(operations.state.value.experienceTransfers).map((transfer) => transfer.fakePlayerId),
         ]);
-        const tasks = Object.values(loaded.state.value.records)
+        const records = Object.values(loaded.state.value.records)
             .filter((record) => (record.lifecycle.kind === "online"
-            && this.runtime.get(record.id)?.alive === true
-            && !pendingIds.has(record.id)))
-            .sort((left, right) => left.id.localeCompare(right.id))
+            && this.runtime.get(record.id)?.alive === true))
+            .sort((left, right) => left.id.localeCompare(right.id));
+        const activeIds = new Set(records.map((record) => record.id));
+        for (const id of this.oneShotNavigations.keys()) {
+            if (!activeIds.has(id))
+                this.oneShotNavigations.delete(id);
+        }
+        for (const record of records)
+            this.refreshOneShotNavigation(record.id);
+        const tasks = records
+            .filter((record) => !pendingIds.has(record.id))
             .flatMap((record) => AUTOMATIC_BEHAVIORS
             .filter((kind) => record.behavior[kind].enabled)
             .map((kind) => ({ key: `${record.id}:${kind}`, kind, record })));
@@ -246,7 +261,27 @@ export class BehaviorService {
             case "use": return this.runUse(record);
         }
     }
+    canUseAutomaticNavigation(record, source) {
+        if (this.oneShotNavigations.has(record.id))
+            return false;
+        if (!record.behavior.follow.enabled || !hasNonFollowPathfinding(record))
+            return true;
+        return (source === "follow") === this.shouldPrioritizeFollow(record);
+    }
+    shouldPrioritizeFollow(record) {
+        const runtime = this.runtime.get(record.id);
+        const config = record.behavior.follow;
+        const target = config.targetPlayerId === null
+            ? undefined
+            : this.worldQueries.findOnlinePlayer(config.targetPlayerId);
+        return runtime !== undefined
+            && target !== undefined
+            && target.dimension === runtime.dimension
+            && distanceSquared(runtime.position, target.position) > config.stopDistance * config.stopDistance;
+    }
     runFollow(record) {
+        if (this.oneShotNavigations.has(record.id))
+            return emptyOutcome(true);
         const config = record.behavior.follow;
         const runtime = this.runtime.get(record.id);
         const target = config.targetPlayerId === null
@@ -258,6 +293,8 @@ export class BehaviorService {
         if (distanceSquared(runtime.position, target.position) <= config.stopDistance * config.stopDistance) {
             return this.stopFollowing(record.id);
         }
+        if (!this.canUseAutomaticNavigation(record, "follow"))
+            return this.stopFollowing(record.id);
         const receipt = this.executeRuntime(record.id, {
             kind: "navigate_entity",
             targetId: target.id,
@@ -289,11 +326,15 @@ export class BehaviorService {
         const chaseTarget = targets[0];
         if (!config.chase || chaseTarget === undefined)
             return emptyOutcome();
+        if (!this.canUseAutomaticNavigation(record, "other"))
+            return emptyOutcome(true);
         const receipt = this.executeRuntime(record.id, {
             kind: "navigate_entity",
             targetId: chaseTarget.id,
             speed: 1,
         });
+        if (receipt.accepted)
+            this.following.delete(record.id);
         return { attempted: true, accepted: receipt.accepted, blockReads: 0 };
     }
     runMine(record, blockBudget) {
@@ -359,11 +400,22 @@ export class BehaviorService {
                 mineDiagnostic: describeMine(record, "blocked", target),
             };
         }
+        if (!this.canUseAutomaticNavigation(record, "other")) {
+            return {
+                attempted: false,
+                accepted: false,
+                blockReads,
+                continueNextTick: true,
+                mineDiagnostic: describeMine(record, "deferred", target),
+            };
+        }
         const receipt = this.executeRuntime(record.id, {
             kind: "navigate",
             position: { x: target.x + 0.5, y: target.y + 1, z: target.z + 0.5 },
             speed: 1,
         });
+        if (receipt.accepted)
+            this.following.delete(record.id);
         return {
             attempted: true,
             accepted: receipt.accepted,
@@ -606,6 +658,47 @@ export class BehaviorService {
         const receipt = this.executeRuntime(id, { kind: "stop_moving" });
         return { attempted: true, accepted: receipt.accepted, blockReads: 0 };
     }
+    recordOneShotNavigation(id, action, runtime) {
+        if (action.kind === "navigate") {
+            this.oneShotNavigations.set(id, {
+                target: { kind: "location", dimension: runtime.dimension, position: { ...action.position } },
+                lastPosition: { ...runtime.position },
+                stalledTicks: 0,
+            });
+            this.following.delete(id);
+        }
+        else if (action.kind === "navigate_entity") {
+            this.oneShotNavigations.set(id, {
+                target: { kind: "entity", targetId: action.targetId },
+                lastPosition: { ...runtime.position },
+                stalledTicks: 0,
+            });
+            this.following.delete(id);
+        }
+        else if (action.kind === "move_to" || action.kind === "stop" || action.kind === "teleport") {
+            this.oneShotNavigations.delete(id);
+        }
+    }
+    refreshOneShotNavigation(id) {
+        const navigation = this.oneShotNavigations.get(id);
+        if (navigation === undefined)
+            return;
+        const runtime = this.runtime.get(id);
+        if (runtime === undefined || !runtime.alive || oneShotNavigationReached(id, runtime, navigation.target, this.worldQueries)) {
+            this.oneShotNavigations.delete(id);
+            return;
+        }
+        if (distanceSquared(runtime.position, navigation.lastPosition)
+            > ONE_SHOT_NAVIGATION_PROGRESS_DISTANCE_SQUARED) {
+            navigation.lastPosition = { ...runtime.position };
+            navigation.stalledTicks = 0;
+            return;
+        }
+        navigation.stalledTicks += 1;
+        if (navigation.stalledTicks >= ONE_SHOT_NAVIGATION_STALL_TICKS) {
+            this.oneShotNavigations.delete(id);
+        }
+    }
     executeRuntime(id, action) {
         const receipt = this.runtime.perform(id, action);
         if (receipt.accepted && interruptsMining(action.kind))
@@ -624,6 +717,7 @@ export class BehaviorService {
         this.mineScans.delete(id);
         this.mineTargets.delete(id);
         this.activeMineTargets.delete(id);
+        this.oneShotNavigations.delete(id);
     }
     removeInactiveRuntimeState(tasks) {
         const activeKeys = new Set(tasks.map((task) => task.key));
@@ -652,6 +746,18 @@ export class BehaviorService {
 }
 function emptyOutcome(continueNextTick = false) {
     return { attempted: false, accepted: false, blockReads: 0, continueNextTick };
+}
+function hasNonFollowPathfinding(record) {
+    return (record.behavior.attack.enabled && record.behavior.attack.chase)
+        || (record.behavior.mine.enabled && record.behavior.mine.approach);
+}
+function oneShotNavigationReached(id, runtime, target, worldQueries) {
+    if (target.kind === "entity") {
+        const targetDistance = worldQueries.distanceSquared(id, target.targetId);
+        return targetDistance === undefined || targetDistance <= ONE_SHOT_NAVIGATION_ARRIVAL_DISTANCE_SQUARED;
+    }
+    return runtime.dimension !== target.dimension
+        || distanceSquared(runtime.position, target.position) <= ONE_SHOT_NAVIGATION_ARRIVAL_DISTANCE_SQUARED;
 }
 function interruptsMining(kind) {
     return kind === "break_block"

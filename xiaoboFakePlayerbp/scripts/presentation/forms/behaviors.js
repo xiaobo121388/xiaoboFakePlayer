@@ -182,18 +182,6 @@ async function openPlaceForm(player, services, record, openDetail) {
     actions.push(() => openPlaceSettingsForm(player, services, record, openDetail, "slot"));
     form.button(t("xiaobo.fp.form.behavior.place.by_item"));
     actions.push(() => openPlaceSettingsForm(player, services, record, openDetail, "item"));
-    form.button(t("xiaobo.fp.form.behavior.place.sync_mainhand"));
-    actions.push(async () => {
-        if (!ready(player, services))
-            return;
-        const itemTypeId = services.inventory.getPlayerMainhandItemTypeId(actorIdentity(player));
-        if (!itemTypeId.ok)
-            return sendError(player, itemTypeId.error.message);
-        await saveBehavior(player, services, record, {
-            ...record.behavior,
-            place: { ...config, selectionMode: "item", itemTypeId: itemTypeId.value },
-        }, openDetail);
-    });
     form.button(t("xiaobo.fp.form.back"));
     actions.push(() => openBehaviorForm(player, services, record, openDetail));
     const response = await form.show(player);
@@ -227,20 +215,41 @@ async function openPlaceSettingsForm(player, services, record, openDetail, selec
         form.textField(t("xiaobo.fp.form.behavior.place.item"), "minecraft:oak_planks", {
             defaultValue: config.itemTypeId ?? "",
         });
+        form.toggle(t("xiaobo.fp.form.behavior.place.use_mainhand"), { defaultValue: false });
     }
     const response = await form.submitButton(t("xiaobo.fp.form.behavior.save")).show(player);
     if (response.canceled || response.formValues === undefined || !ready(player, services))
         return;
-    const [enabled, intervalTicks, modeIndex, x, y, z, selection] = response.formValues;
+    const [enabled, intervalTicks, modeIndex, x, y, z, selection, usePlayerMainhand] = response.formValues;
     const mode = typeof modeIndex === "number" ? PLACE_MODES[modeIndex] : undefined;
     if (typeof enabled !== "boolean" || mode === undefined || typeof x !== "string"
-        || typeof y !== "string" || typeof z !== "string"
-        || (selectionMode === "slot" ? typeof selection !== "number" : typeof selection !== "string")) {
+        || typeof y !== "string" || typeof z !== "string") {
         return sendError(player, "自动交互（放置）表单数据无效。");
     }
     const position = parseOptionalBlockPosition(x, y, z);
     if (position === undefined || (mode === "position" && position === null)) {
         return sendError(player, "指定坐标模式需要完整的整数 X、Y、Z 坐标。");
+    }
+    let slot = config.slot;
+    let itemTypeId = config.itemTypeId;
+    if (selectionMode === "slot") {
+        if (typeof selection !== "number")
+            return sendError(player, "自动交互（放置）表单数据无效。");
+        slot = selection;
+    }
+    else {
+        if (typeof selection !== "string" || typeof usePlayerMainhand !== "boolean") {
+            return sendError(player, "自动交互（放置）表单数据无效。");
+        }
+        if (usePlayerMainhand) {
+            const mainhandItemTypeId = services.inventory.getPlayerMainhandItemTypeId(actorIdentity(player));
+            if (!mainhandItemTypeId.ok)
+                return sendError(player, mainhandItemTypeId.error.message);
+            itemTypeId = mainhandItemTypeId.value;
+        }
+        else {
+            itemTypeId = selection.trim() || null;
+        }
     }
     await saveBehavior(player, services, record, {
         ...record.behavior,
@@ -250,8 +259,8 @@ async function openPlaceSettingsForm(player, services, record, openDetail, selec
             mode,
             position,
             selectionMode,
-            slot: selectionMode === "slot" ? selection : config.slot,
-            itemTypeId: selectionMode === "item" ? selection.trim() || null : config.itemTypeId,
+            slot,
+            itemTypeId,
         },
     }, openDetail);
 }

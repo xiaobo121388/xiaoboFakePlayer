@@ -552,17 +552,46 @@ export class BehaviorService {
                     placeDiagnostic: describePlace(record, "out_of_range", undefined, undefined, hit.position, hit.face, hit.distance),
                 };
             }
+            const support = this.worldQueries.getBlockInfo(runtime.dimension, hit.position);
+            const target = addPoints(hit.position, faceOffset(hit.face));
+            if (support === undefined || isAirBlock(support)) {
+                return {
+                    attempted: false,
+                    accepted: false,
+                    blockReads: 1,
+                    placeDiagnostic: describePlace(record, "target_missing", undefined, support, hit.position, hit.face, hit.distance),
+                };
+            }
+            const chestSupport = CHEST_BLOCK_TYPE_IDS.has(support.typeId);
+            const directPlacement = chestSupport && runtime.isSneaking && inventorySlot.placeableBlock;
+            if (!directPlacement && (!inventorySlot.placeableBlock || support.solid !== true)) {
+                const receipt = this.executeRuntime(record.id, {
+                    kind: "interact_block",
+                    position: hit.position,
+                    face: hit.face,
+                    aim: addPoints(hit.position, hit.faceLocation),
+                    selection: config.selectionMode === "slot"
+                        ? { mode: "slot", slot: inventorySlot.slot }
+                        : {
+                            mode: "item",
+                            slot: inventorySlot.slot,
+                            emptyHand: inventorySlot.itemTypeId === null,
+                        },
+                });
+                return {
+                    attempted: true,
+                    accepted: receipt.accepted,
+                    blockReads: 1,
+                    placeDiagnostic: describePlace(record, receipt.accepted ? "accepted" : "runtime_rejected", undefined, support, hit.position, hit.face, hit.distance, inventorySlot),
+                };
+            }
             if (blockBudget < 2) {
                 return {
                     ...emptyOutcome(true),
                     placeDiagnostic: describePlace(record, "block_budget_exhausted"),
                 };
             }
-            const support = this.worldQueries.getBlockInfo(runtime.dimension, hit.position);
-            const target = addPoints(hit.position, faceOffset(hit.face));
             const targetInfo = this.worldQueries.getBlockInfo(runtime.dimension, target);
-            const chestSupport = support !== undefined && CHEST_BLOCK_TYPE_IDS.has(support.typeId);
-            const directPlacement = chestSupport && runtime.isSneaking && inventorySlot.placeableBlock;
             if (support === undefined || (!chestSupport && support.solid !== true)) {
                 return {
                     attempted: false,
@@ -582,16 +611,14 @@ export class BehaviorService {
             const receipt = this.executeRuntime(record.id, directPlacement
                 ? { kind: "place_block_direct", slot: inventorySlot.slot, position: target }
                 : {
-                    kind: "interact_block",
+                    kind: "build_block",
                     position: hit.position,
                     face: hit.face,
+                    aim: addPoints(hit.position, hit.faceLocation),
+                    target,
                     selection: config.selectionMode === "slot"
                         ? { mode: "slot", slot: inventorySlot.slot }
-                        : {
-                            mode: "item",
-                            slot: inventorySlot.slot,
-                            emptyHand: inventorySlot.itemTypeId === null,
-                        },
+                        : { mode: "item", slot: inventorySlot.slot, emptyHand: false },
                 });
             return {
                 attempted: true,
@@ -606,6 +633,29 @@ export class BehaviorService {
         }
         const targetInfo = this.worldQueries.getBlockInfo(runtime.dimension, target);
         let blockReads = 1;
+        if (targetInfo !== undefined
+            && !isAirBlock(targetInfo)
+            && (!inventorySlot.placeableBlock || targetInfo.solid !== true)) {
+            const face = mineTargetFace(runtime.headPosition, target);
+            const receipt = this.executeRuntime(record.id, {
+                kind: "interact_block",
+                position: target,
+                face,
+                selection: config.selectionMode === "slot"
+                    ? { mode: "slot", slot: inventorySlot.slot }
+                    : {
+                        mode: "item",
+                        slot: inventorySlot.slot,
+                        emptyHand: inventorySlot.itemTypeId === null,
+                    },
+            });
+            return {
+                attempted: true,
+                accepted: receipt.accepted,
+                blockReads,
+                placeDiagnostic: describePlace(record, receipt.accepted ? "accepted" : "runtime_rejected", target, targetInfo, target, face, undefined, inventorySlot),
+            };
+        }
         if (!isAirBlock(targetInfo)) {
             return {
                 attempted: false,
@@ -635,18 +685,28 @@ export class BehaviorService {
                 continue;
             const receipt = this.executeRuntime(record.id, directPlacement
                 ? { kind: "place_block_direct", slot: inventorySlot.slot, position: target }
-                : {
-                    kind: "interact_block",
-                    position: supportPosition,
-                    face: candidate.face,
-                    selection: config.selectionMode === "slot"
-                        ? { mode: "slot", slot: inventorySlot.slot }
-                        : {
-                            mode: "item",
-                            slot: inventorySlot.slot,
-                            emptyHand: inventorySlot.itemTypeId === null,
-                        },
-                });
+                : inventorySlot.placeableBlock
+                    ? {
+                        kind: "build_block",
+                        position: supportPosition,
+                        face: candidate.face,
+                        target,
+                        selection: config.selectionMode === "slot"
+                            ? { mode: "slot", slot: inventorySlot.slot }
+                            : { mode: "item", slot: inventorySlot.slot, emptyHand: false },
+                    }
+                    : {
+                        kind: "interact_block",
+                        position: supportPosition,
+                        face: candidate.face,
+                        selection: config.selectionMode === "slot"
+                            ? { mode: "slot", slot: inventorySlot.slot }
+                            : {
+                                mode: "item",
+                                slot: inventorySlot.slot,
+                                emptyHand: inventorySlot.itemTypeId === null,
+                            },
+                    });
             return {
                 attempted: true,
                 accepted: receipt.accepted,
@@ -770,6 +830,7 @@ function oneShotNavigationReached(id, runtime, target, worldQueries) {
 }
 function interruptsMining(kind) {
     return kind === "break_block"
+        || kind === "build_block"
         || kind === "interact_block"
         || kind === "interact_entity"
         || kind === "place_block_direct"
@@ -949,9 +1010,14 @@ function mapAction(fakePlayerId, action, runtime, worldQueries) {
             const target = validateEntityTarget(fakePlayerId, action.targetId, worldQueries);
             return target.ok ? ok(action) : target;
         }
-        case "break_block":
-        case "interact_block": {
+        case "break_block": {
             const target = validateBlockTarget(fakePlayerId, action, runtime.dimension, worldQueries);
+            return target.ok
+                ? ok({ kind: action.kind, position: target.value, face: action.face })
+                : target;
+        }
+        case "interact_block": {
+            const target = validateBlockTarget(fakePlayerId, action, runtime.dimension, worldQueries, false);
             return target.ok
                 ? ok({ kind: action.kind, position: target.value, face: action.face })
                 : target;
@@ -1008,13 +1074,18 @@ function validateEntityTarget(fakePlayerId, targetId, worldQueries, requireReach
     }
     return ok(undefined);
 }
-function validateBlockTarget(fakePlayerId, action, runtimeDimension, worldQueries) {
+function validateBlockTarget(fakePlayerId, action, runtimeDimension, worldQueries, requireSolid = true) {
     const coordinate = validateCoordinateTarget(action.dimension, action.position, runtimeDimension, worldQueries);
     if (!coordinate.ok)
         return coordinate;
     const position = floorPoint(action.position);
-    if (!worldQueries.isSolidBlock(action.dimension, position)) {
+    if (requireSolid && !worldQueries.isSolidBlock(action.dimension, position)) {
         return err("INVALID_STATE", "目标位置不是可交互的固体方块。");
+    }
+    if (!requireSolid) {
+        const info = worldQueries.getBlockInfo(action.dimension, position);
+        if (info === undefined || isAirBlock(info))
+            return err("INVALID_STATE", "目标位置没有可交互方块。");
     }
     if (!worldQueries.hasBlockLineOfSight(fakePlayerId, action.dimension, position, MAX_INTERACTION_DISTANCE)) {
         return err("INVALID_STATE", `目标方块不在 ${MAX_INTERACTION_DISTANCE} 格可见范围内。`);

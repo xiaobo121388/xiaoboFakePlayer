@@ -10,6 +10,7 @@ import {
 } from "@minecraft/server";
 import {
     getPlayerSkin,
+    LookDuration,
     PersonaArmSize,
     PersonaPieceType,
     SimulatedPlayer,
@@ -18,6 +19,7 @@ import {
 } from "@minecraft/server-gametest";
 
 import type {
+    BlockFace,
     FakePlayerRuntime,
     RuntimeActionReceipt,
     RuntimeFakePlayer,
@@ -27,7 +29,7 @@ import type {
     SpawnFakePlayerRequest,
 } from "../../application/ports.js";
 import { HOTBAR_SLOT_COUNT, INVENTORY_SLOT_COUNT } from "../../domain/inventory.js";
-import type { FakePlayerGameMode, FakePlayerId, FakePlayerSkin, SavedLocation } from "../../domain/model.js";
+import type { FakePlayerGameMode, FakePlayerId, FakePlayerSkin, Point, SavedLocation } from "../../domain/model.js";
 
 const TAG_PREFIX = "xiaobo_fp_";
 const MAX_EXPERIENCE_CHANGE = 16_777_216;
@@ -142,6 +144,7 @@ export class SapiFakePlayerRuntime implements FakePlayerRuntime {
                 else console.warn(message);
                 return { accepted };
             }
+            case "build_block":
             case "interact_block": {
                 const selection = action.selection;
                 if (selection?.mode === "slot") {
@@ -150,7 +153,7 @@ export class SapiFakePlayerRuntime implements FakePlayerRuntime {
                     }
                     player.selectedSlotIndex = selection.slot;
                 }
-                const inventory = selection?.mode === "item"
+                const inventory = action.kind === "build_block" || selection?.mode === "item"
                     ? player.getComponent(EntityComponentTypes.Inventory) as EntityInventoryComponent | undefined
                     : undefined;
                 const container = inventory?.container;
@@ -161,6 +164,9 @@ export class SapiFakePlayerRuntime implements FakePlayerRuntime {
                 if (selection?.mode === "item" && container === undefined) {
                     throw new Error(`interact ${id}: 缺少库存容器，无法准备交互物品。`);
                 }
+                if (action.kind === "build_block" && container === undefined) {
+                    throw new Error(`place ${id}: 缺少库存容器，无法准备建造物品。`);
+                }
                 const swapsItem = selection?.mode === "item"
                     && !selection.emptyHand
                     && selection.slot !== selectedSlot;
@@ -170,7 +176,33 @@ export class SapiFakePlayerRuntime implements FakePlayerRuntime {
                         if (selection.emptyHand) container?.setItem(selectedSlot);
                         else if (swapsItem) container?.swapItems(selection.slot, selectedSlot, container);
                     }
-                    accepted = player.interactWithBlock(action.position, toDirection(action.face));
+                    if (action.kind === "build_block") {
+                        player.lookAtLocation(
+                            action.aim ?? blockFaceCenter(action.position, action.face),
+                            LookDuration.Instant,
+                        );
+                        const target = player.dimension.getBlock(action.target);
+                        if (target === undefined || !target.isAir) {
+                            accepted = false;
+                        } else {
+                            player.stopBreakingBlock();
+                            const swapsBuildSlot = selectedSlot !== 0;
+                            if (swapsBuildSlot) container!.swapItems(selectedSlot, 0, container!);
+                            try {
+                                player.startBuild();
+                                player.stopBuild();
+                                accepted = true;
+                            } finally {
+                                if (swapsBuildSlot && player.isValid) {
+                                    container!.swapItems(selectedSlot, 0, container!);
+                                }
+                            }
+                        }
+                    } else {
+                        if (action.aim === undefined) player.lookAtBlock(action.position, LookDuration.Instant);
+                        else player.lookAtLocation(action.aim, LookDuration.Instant);
+                        accepted = player.interact();
+                    }
                 } finally {
                     if (selection?.mode === "item" && player.isValid) {
                         if (selection.emptyHand) container?.setItem(selectedSlot, selectedItem);
@@ -410,7 +442,7 @@ function fromGameMode(gameMode: GameMode): FakePlayerGameMode {
     }
 }
 
-function toDirection(face: RuntimeFakePlayerAction extends infer _Action ? import("../../application/ports.js").BlockFace : never): Direction {
+function toDirection(face: BlockFace): Direction {
     switch (face) {
         case "down": return Direction.Down;
         case "east": return Direction.East;
@@ -454,4 +486,15 @@ function toPlayerSkinData(skin: Extract<FakePlayerSkin, { kind: "persona" }>): P
         })),
         ...(skin.skinColor === undefined ? {} : { skinColor: skin.skinColor }),
     };
+}
+
+function blockFaceCenter(position: Point, face: BlockFace): Point {
+    switch (face) {
+        case "down": return { x: position.x + 0.5, y: position.y, z: position.z + 0.5 };
+        case "east": return { x: position.x + 1, y: position.y + 0.5, z: position.z + 0.5 };
+        case "north": return { x: position.x + 0.5, y: position.y + 0.5, z: position.z };
+        case "south": return { x: position.x + 0.5, y: position.y + 0.5, z: position.z + 1 };
+        case "up": return { x: position.x + 0.5, y: position.y + 1, z: position.z + 0.5 };
+        case "west": return { x: position.x, y: position.y + 0.5, z: position.z + 0.5 };
+    }
 }

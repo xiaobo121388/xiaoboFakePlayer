@@ -133,6 +133,7 @@ export class SapiFakePlayerRuntime {
                 player.setBodyRotation(action.angle);
                 return { accepted: true };
             case "set_sneaking":
+                player.stopInteracting();
                 player.isSneaking = action.enabled;
                 return { accepted: true };
             case "stop":
@@ -158,7 +159,10 @@ export class SapiFakePlayerRuntime {
                 const inventory = player.getComponent(EntityComponentTypes.Inventory);
                 const item = inventory?.container.getItem(action.slot);
                 let accepted;
+                let sneaking;
                 try {
+                    player.stopInteracting();
+                    sneaking = player.isSneaking;
                     accepted = player.useItemInSlotOnBlock(action.slot, action.position, toDirection(action.face), action.faceLocation);
                 }
                 catch (cause) {
@@ -170,7 +174,8 @@ export class SapiFakePlayerRuntime {
                     + `dimension=${player.dimension.id}; support=${formatPoint(action.position)}; `
                     + `face=${action.face}; faceLocation=${formatPoint(action.faceLocation)}; `
                     + `slot=${action.slot}; item=${item === undefined ? "empty" : `${item.typeId}x${item.amount}`}; `
-                    + `mode=${player.getGameMode()}; selectedSlot=${player.selectedSlotIndex}`;
+                    + `mode=${player.getGameMode()}; selectedSlot=${player.selectedSlotIndex}; `
+                    + `sneaking=${sneaking}`;
                 if (accepted)
                     console.info(message);
                 else

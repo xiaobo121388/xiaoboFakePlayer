@@ -27,6 +27,12 @@ export interface InventoryCheckpoint {
     readonly structureId: string;
 }
 
+export interface InventorySnapshotRestore {
+    readonly inventoryRevision: number | null;
+    readonly inventoryFallbackRevision: number | null;
+    readonly usedFallback: boolean;
+}
+
 export interface TransferRecoverySummary {
     readonly recovered: number;
     readonly diagnostics: readonly string[];
@@ -348,6 +354,15 @@ export class InventoryService {
         const snapshotRevision = (record.inventoryRevision ?? 0) + 1;
         const saved = this.snapshots.save(id, snapshotRevision);
         if (!saved.ok) return saved;
+        const currentSnapshotExists = record.inventoryRevision !== null
+            && this.snapshots.has(snapshotId(id, record.inventoryRevision));
+        const fallbackSnapshotExists = record.inventoryFallbackRevision !== null
+            && this.snapshots.has(snapshotId(id, record.inventoryFallbackRevision));
+        const fallbackRevision = currentSnapshotExists
+            ? record.inventoryRevision
+            : fallbackSnapshotExists
+                ? record.inventoryFallbackRevision
+                : null;
         const nextRecord: FakePlayerRecord = {
             ...record,
             recordRevision: record.recordRevision + 1,
@@ -360,6 +375,7 @@ export class InventoryService {
             selectedSlot: runtime.selectedSlot,
             totalExperience: runtime.totalExperience,
             inventoryRevision: snapshotRevision,
+            inventoryFallbackRevision: fallbackRevision,
             lastCheckpointTick: currentTick,
         };
         const committed = commitRecord(this.stateStore, loaded.state.revision, loaded.state.value, nextRecord);
@@ -371,11 +387,12 @@ export class InventoryService {
         }
 
         this.dirty.delete(id);
-        if (record.inventoryRevision !== null) {
-            const previousId = snapshotId(id, record.inventoryRevision);
-            const removed = this.snapshots.remove(previousId);
+        if (record.inventoryFallbackRevision !== null
+            && record.inventoryFallbackRevision !== fallbackRevision) {
+            const obsoleteId = snapshotId(id, record.inventoryFallbackRevision);
+            const removed = this.snapshots.remove(obsoleteId);
             if (!removed.ok) {
-                return err("CONFLICT", `新快照 ${saved.value} 已提交，但旧快照 ${previousId} 清理失败：${removed.error.message}`);
+                return err("CONFLICT", `新快照 ${saved.value} 已提交，但过期快照 ${obsoleteId} 清理失败：${removed.error.message}`);
             }
         }
         return ok({ record: nextRecord, structureId: saved.value });
@@ -433,8 +450,24 @@ export class InventoryService {
                     break;
                 }
                 case "checkpointed": {
-                    const oldSnapshot = this.snapshots.remove(transfer.fakeSnapshotId);
-                    if (!oldSnapshot.ok) return oldSnapshot;
+                    const record = this.loadCommittedInventoryRecord(transfer);
+                    if (!record.ok || record.value.inventoryRevision === null) {
+                        return record.ok
+                            ? err("INVALID_STATE", `库存事务 ${transfer.id} 提交后缺少库存 revision。`)
+                            : record;
+                    }
+                    const obsoleteSnapshots = new Set([
+                        transfer.fakeSnapshotId,
+                        ...(transfer.fakeFallbackSnapshotId === undefined
+                            ? record.value.inventoryRevision > 2
+                                ? [snapshotId(transfer.fakePlayerId, record.value.inventoryRevision - 2)]
+                                : []
+                            : [transfer.fakeFallbackSnapshotId]),
+                    ]);
+                    for (const structureId of obsoleteSnapshots) {
+                        const removed = this.snapshots.remove(structureId);
+                        if (!removed.ok) return removed;
+                    }
                     const images = this.access.removeTransferImages(transfer);
                     if (!images.ok) return images;
                     const removed = this.removeInventoryTransfer(transfer.id);
@@ -567,6 +600,7 @@ export class InventoryService {
             ...record,
             recordRevision: record.recordRevision + 1,
             inventoryRevision: nextRevision,
+            inventoryFallbackRevision: null,
         };
         const committed = commitRecord(this.stateStore, loaded.state.revision, loaded.state.value, nextRecord);
         return committed.ok ? ok(nextRecord) : committed;
@@ -806,6 +840,54 @@ export function snapshotId(id: FakePlayerId, revision: number): string {
     return `xiaobo:${id}_inv_${revision}`;
 }
 
+export function availableInventoryFallbackRevision(
+    snapshots: InventorySnapshotStore,
+    record: Pick<FakePlayerRecord, "id" | "inventoryRevision" | "inventoryFallbackRevision">,
+): number | null {
+    if (record.inventoryRevision !== null
+        && snapshots.has(snapshotId(record.id, record.inventoryRevision))) {
+        return record.inventoryRevision;
+    }
+    return record.inventoryFallbackRevision !== null
+        && snapshots.has(snapshotId(record.id, record.inventoryFallbackRevision))
+        ? record.inventoryFallbackRevision
+        : null;
+}
+
+export function restoreInventorySnapshot(
+    snapshots: InventorySnapshotStore,
+    record: Pick<FakePlayerRecord, "id" | "inventoryRevision" | "inventoryFallbackRevision">,
+): Result<InventorySnapshotRestore> {
+    if (record.inventoryRevision === null) {
+        return ok({ inventoryRevision: null, inventoryFallbackRevision: null, usedFallback: false });
+    }
+    const currentId = snapshotId(record.id, record.inventoryRevision);
+    if (snapshots.has(currentId)) {
+        const restored = snapshots.restore(record.id, currentId);
+        return restored.ok
+            ? ok({
+                inventoryRevision: record.inventoryRevision,
+                inventoryFallbackRevision: record.inventoryFallbackRevision,
+                usedFallback: false,
+            })
+            : restored;
+    }
+    if (record.inventoryFallbackRevision !== null) {
+        const fallbackId = snapshotId(record.id, record.inventoryFallbackRevision);
+        if (snapshots.has(fallbackId)) {
+            const restored = snapshots.restore(record.id, fallbackId);
+            return restored.ok
+                ? ok({
+                    inventoryRevision: record.inventoryFallbackRevision,
+                    inventoryFallbackRevision: null,
+                    usedFallback: true,
+                })
+                : restored;
+        }
+    }
+    return err("NOT_FOUND", `库存快照 ${currentId} 不存在，且没有可用的上一代快照。`);
+}
+
 function checkpointDue(record: FakePlayerRecord, currentTick: number): boolean {
     return record.lastCheckpointTick === null
         || currentTick < record.lastCheckpointTick
@@ -838,6 +920,9 @@ function createInventoryTransfer(
         playerId,
         fakePlayerRevision: record.recordRevision,
         fakeSnapshotId: snapshotId(record.id, record.inventoryRevision ?? 0),
+        ...(record.inventoryFallbackRevision === null
+            ? {}
+            : { fakeFallbackSnapshotId: snapshotId(record.id, record.inventoryFallbackRevision) }),
         fakeAfterSnapshotId: snapshotId(record.id, nextInventoryRevision),
         request,
         beforeStructureId: `xiaobo:${record.id}_tx_${record.recordRevision}_before`,

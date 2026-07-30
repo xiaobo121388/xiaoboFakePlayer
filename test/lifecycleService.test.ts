@@ -117,6 +117,7 @@ class MemoryRuntime implements FakePlayerRuntime {
 class MemorySnapshots implements InventorySnapshotStore {
     public readonly saved = new Set<string>();
     public failSave = false;
+    public failRestore = false;
     public saveCount = 0;
     public restoreCount = 0;
 
@@ -130,6 +131,7 @@ class MemorySnapshots implements InventorySnapshotStore {
 
     public restore(_fakePlayerId: FakePlayerId, structureId: string): Result<void> {
         this.restoreCount += 1;
+        if (this.failRestore) return err("CONFLICT", "injected restore failure");
         return this.saved.has(structureId) ? ok(undefined) : err("NOT_FOUND", "snapshot missing");
     }
 
@@ -342,6 +344,52 @@ test("snapshot failure leaves an online entity with snapshotting recovery intent
     assert.equal(fixture.runtime.players.has(created.value.id), true);
 });
 
+test("bring online removes the spawned fake player when no inventory snapshot can be restored", () => {
+    const fixture = createFixture();
+    const created = fixture.service.create(operator, createRequest);
+    assert.equal(created.ok, true);
+    if (!created.ok) return;
+    const offline = fixture.service.takeOffline(operator, created.value.id, created.value.recordRevision);
+    assert.equal(offline.ok, true);
+    if (!offline.ok || offline.value.inventoryRevision === null) return;
+    fixture.snapshots.remove(snapshotId(offline.value.id, offline.value.inventoryRevision));
+
+    const result = fixture.service.bringOnline(operator, offline.value.id, offline.value.recordRevision);
+
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.error.code, "NOT_FOUND");
+    assert.equal(fixture.runtime.get(offline.value.id), undefined);
+    const loaded = fixture.state.loadCatalog();
+    assert.equal(loaded.ok, true);
+    if (loaded.ok) assert.equal(loaded.state.value.records[offline.value.id]?.lifecycle.kind, "restoring");
+});
+
+test("recovery removes the spawned fake player when a pending restore has no safe snapshot", () => {
+    const fixture = createFixture();
+    const created = fixture.service.create(operator, createRequest);
+    assert.equal(created.ok, true);
+    if (!created.ok) return;
+    const offline = fixture.service.takeOffline(operator, created.value.id, created.value.recordRevision);
+    assert.equal(offline.ok, true);
+    if (!offline.ok || offline.value.inventoryRevision === null) return;
+    fixture.snapshots.remove(snapshotId(offline.value.id, offline.value.inventoryRevision));
+    assert.equal(fixture.service.bringOnline(operator, offline.value.id, offline.value.recordRevision).ok, false);
+    fixture.runtime.players.delete(offline.value.id);
+    const recovery = new RecoveryRunner(
+        fixture.state,
+        fixture.runtime,
+        fixture.snapshots,
+        fixture.coordinator,
+        fixture.inventory,
+    );
+
+    const result = recovery.run();
+
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.error.code, "NOT_FOUND");
+    assert.equal(fixture.runtime.get(offline.value.id), undefined);
+});
+
 test("operation coordinator sorts, deduplicates, and releases resource keys", () => {
     const coordinator = new OperationCoordinator();
     const first = coordinator.tryAcquire(["player:b", "fake:a", "fake:a"]);
@@ -377,6 +425,45 @@ test("recovery completes provisioning exactly once after a spawn interruption", 
     const second = recovery.run();
     assert.equal(second.ok, true);
     assert.equal(fixture.runtime.spawnCount, 1);
+});
+
+test("recovery falls back to the previous snapshot after a forced exit loses the latest image", () => {
+    const fixture = createFixture();
+    const created = fixture.service.create(operator, createRequest);
+    assert.equal(created.ok, true);
+    if (!created.ok) return;
+    const first = fixture.inventory.checkpoint(created.value.id, created.value.recordRevision, 20);
+    assert.equal(first.ok, true);
+    if (!first.ok) return;
+    const second = fixture.inventory.checkpoint(first.value.record.id, first.value.record.recordRevision, 40);
+    assert.equal(second.ok, true);
+    if (!second.ok) return;
+    assert.equal(fixture.snapshots.has(snapshotId(created.value.id, 1)), true);
+
+    fixture.snapshots.remove(second.value.structureId);
+    fixture.runtime.players.delete(created.value.id);
+    const recovery = new RecoveryRunner(
+        fixture.state,
+        fixture.runtime,
+        fixture.snapshots,
+        fixture.coordinator,
+        fixture.inventory,
+    );
+
+    const result = recovery.run();
+
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.match(result.value.diagnostics.join("; "), /上一代库存快照/);
+    const loaded = fixture.state.loadCatalog();
+    assert.equal(loaded.ok, true);
+    if (loaded.ok) {
+        const record = loaded.state.value.records[created.value.id];
+        assert.equal(record?.lifecycle.kind, "online");
+        assert.equal(record?.inventoryRevision, 1);
+        assert.equal(record?.lastCheckpointTick, null);
+    }
+    assert.equal(fixture.runtime.get(created.value.id)?.alive, true);
 });
 
 test("recovery commits a verified snapshot without saving it twice", () => {
@@ -416,6 +503,58 @@ test("recovery commits a verified snapshot without saving it twice", () => {
     assert.equal(fixture.snapshots.saveCount, 1);
 });
 
+test("recovery completes snapshotting from the prior image when the verified structure was not persisted", () => {
+    const fixture = createFixture();
+    const created = fixture.service.create(operator, createRequest);
+    assert.equal(created.ok, true);
+    if (!created.ok) return;
+    const checkpoint = fixture.inventory.checkpoint(created.value.id, created.value.recordRevision, 20);
+    assert.equal(checkpoint.ok, true);
+    if (!checkpoint.ok) return;
+    const loaded = fixture.state.loadCatalog();
+    assert.equal(loaded.ok, true);
+    if (!loaded.ok) return;
+    const operation: LifecycleOperation = {
+        id: `${checkpoint.value.record.id}:offline:${checkpoint.value.record.recordRevision}`,
+        kind: "offline",
+        previous: "online",
+        target: "offline",
+        phase: "snapshot_verified:2",
+    };
+    const pending = {
+        ...checkpoint.value.record,
+        recordRevision: checkpoint.value.record.recordRevision + 1,
+        lifecycle: { kind: "snapshotting" as const, operation },
+        expectedOnline: false,
+    };
+    assert.equal(fixture.state.commitCatalog(loaded.state.revision, {
+        ...loaded.state.value,
+        records: { ...loaded.state.value.records, [pending.id]: pending },
+    }).ok, true);
+    assert.equal(fixture.snapshots.has(snapshotId(pending.id, 1)), true);
+    assert.equal(fixture.snapshots.has(snapshotId(pending.id, 2)), false);
+
+    const recovery = new RecoveryRunner(
+        fixture.state,
+        fixture.runtime,
+        fixture.snapshots,
+        fixture.coordinator,
+        fixture.inventory,
+    );
+    const result = recovery.run();
+
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    const recovered = fixture.state.loadCatalog();
+    assert.equal(recovered.ok, true);
+    if (!recovered.ok) return;
+    const record = recovered.state.value.records[pending.id];
+    assert.equal(record?.lifecycle.kind, "offline");
+    assert.equal(record?.inventoryRevision, 1);
+    assert.equal(record?.inventoryFallbackRevision, null);
+    assert.equal(fixture.runtime.get(pending.id), undefined);
+});
+
 test("online rename checkpoints once and restores the same record under the new name", () => {
     const fixture = createFixture();
     const created = fixture.service.create(operator, createRequest);
@@ -434,6 +573,52 @@ test("online rename checkpoints once and restores the same record under the new 
     assert.equal(fixture.runtime.players.get(created.value.id)?.name, "Builder");
     assert.equal(fixture.snapshots.saveCount, 1);
     assert.equal(fixture.snapshots.restoreCount, 1);
+});
+
+test("online rename removes its spawned target when inventory restore fails", () => {
+    const fixture = createFixture();
+    const created = fixture.service.create(operator, createRequest);
+    assert.equal(created.ok, true);
+    if (!created.ok) return;
+    fixture.snapshots.failRestore = true;
+
+    const result = fixture.service.rename(operator, created.value.id, created.value.recordRevision, {
+        requestedName: "Builder",
+        unavailablePlayerNames: [],
+    });
+
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.error.code, "CONFLICT");
+    assert.equal(fixture.runtime.get(created.value.id), undefined);
+    const loaded = fixture.state.loadCatalog();
+    assert.equal(loaded.ok, true);
+    if (loaded.ok) assert.equal(loaded.state.value.records[created.value.id]?.lifecycle.kind, "renaming");
+});
+
+test("rename recovery removes its spawned target when inventory restore still fails", () => {
+    const fixture = createFixture();
+    const created = fixture.service.create(operator, createRequest);
+    assert.equal(created.ok, true);
+    if (!created.ok) return;
+    fixture.snapshots.failRestore = true;
+    assert.equal(fixture.service.rename(operator, created.value.id, created.value.recordRevision, {
+        requestedName: "Builder",
+        unavailablePlayerNames: [],
+    }).ok, false);
+    fixture.runtime.players.delete(created.value.id);
+    const recovery = new RecoveryRunner(
+        fixture.state,
+        fixture.runtime,
+        fixture.snapshots,
+        fixture.coordinator,
+        fixture.inventory,
+    );
+
+    const result = recovery.run();
+
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.error.code, "CONFLICT");
+    assert.equal(fixture.runtime.get(created.value.id), undefined);
 });
 
 test("offline rename changes the reserved name without spawning an entity", () => {
@@ -785,6 +970,125 @@ test("recovery rebuilds a missing online fake player before preserving its confl
     assert.equal(fixture.runtime.get(created.value.id)?.alive, true);
     assert.equal(fixture.snapshots.restoreCount, restoresBefore + 1);
     assert.match(result.value.diagnostics.join("; "), /mixed/);
+});
+
+test("recovery does not spawn a pending inventory transfer without its exact snapshot", () => {
+    const fixture = createFixture();
+    const created = fixture.service.create(operator, createRequest);
+    assert.equal(created.ok, true);
+    if (!created.ok) return;
+    const first = fixture.inventory.checkpoint(created.value.id, created.value.recordRevision, 10);
+    assert.equal(first.ok, true);
+    if (!first.ok) return;
+    const second = fixture.inventory.checkpoint(first.value.record.id, first.value.record.recordRevision, 30);
+    assert.equal(second.ok, true);
+    if (!second.ok) return;
+    const transfer: InventoryTransfer = {
+        id: `${second.value.record.id}:inventory:${second.value.record.recordRevision}`,
+        fakePlayerId: second.value.record.id,
+        playerId: operator.playerId,
+        fakePlayerRevision: second.value.record.recordRevision,
+        fakeSnapshotId: second.value.structureId,
+        fakeAfterSnapshotId: snapshotId(second.value.record.id, 3),
+        request: { kind: "recycle_all" },
+        beforeStructureId: "before",
+        afterStructureId: "after",
+        phase: "applying",
+    };
+    const operations = fixture.state.loadOperations();
+    assert.equal(operations.ok, true);
+    if (!operations.ok) return;
+    assert.equal(fixture.state.commitOperations(operations.state.revision, {
+        ...operations.state.value,
+        inventoryTransfers: { [transfer.id]: transfer },
+    }).ok, true);
+    fixture.snapshots.remove(second.value.structureId);
+    fixture.runtime.players.delete(created.value.id);
+
+    const recovery = new RecoveryRunner(
+        fixture.state,
+        fixture.runtime,
+        fixture.snapshots,
+        fixture.coordinator,
+        fixture.inventory,
+    );
+    const restoresBefore = fixture.snapshots.restoreCount;
+    const result = recovery.run();
+
+    assert.equal(result.ok, false);
+    if (result.ok) return;
+    assert.equal(result.error.code, "NOT_FOUND");
+    assert.equal(fixture.runtime.get(created.value.id), undefined);
+    assert.equal(fixture.snapshots.restoreCount, restoresBefore);
+    assert.equal(fixture.snapshots.has(snapshotId(created.value.id, 1)), true);
+});
+
+test("recovery uses the fallback inventory for a pending experience-only transfer", () => {
+    const fixture = createFixture();
+    const created = fixture.service.create(operator, createRequest);
+    assert.equal(created.ok, true);
+    if (!created.ok) return;
+    const first = fixture.inventory.checkpoint(created.value.id, created.value.recordRevision, 10);
+    assert.equal(first.ok, true);
+    if (!first.ok) return;
+    const second = fixture.inventory.checkpoint(first.value.record.id, first.value.record.recordRevision, 30);
+    assert.equal(second.ok, true);
+    if (!second.ok) return;
+    const catalog = fixture.state.loadCatalog();
+    assert.equal(catalog.ok, true);
+    if (!catalog.ok) return;
+    const pendingRecord = { ...second.value.record, totalExperience: 20 };
+    assert.equal(fixture.state.commitCatalog(catalog.state.revision, {
+        ...catalog.state.value,
+        records: { ...catalog.state.value.records, [pendingRecord.id]: pendingRecord },
+    }).ok, true);
+    const transfer: ExperienceTransfer = {
+        id: `${pendingRecord.id}:experience:${pendingRecord.recordRevision}`,
+        fakePlayerId: pendingRecord.id,
+        playerId: operator.playerId,
+        fakePlayerRevision: pendingRecord.recordRevision,
+        kind: "fake_to_player",
+        fakePlayerBefore: 20,
+        playerBefore: 10,
+        amount: 7,
+        phase: "applying",
+    };
+    const operations = fixture.state.loadOperations();
+    assert.equal(operations.ok, true);
+    if (!operations.ok) return;
+    assert.equal(fixture.state.commitOperations(operations.state.revision, {
+        ...operations.state.value,
+        experienceTransfers: { [transfer.id]: transfer },
+    }).ok, true);
+    fixture.inventoryAccess.playerExperience.set(operator.playerId, transfer.playerBefore);
+    fixture.inventoryAccess.playerExperience.set(`fake:${pendingRecord.id}`, transfer.fakePlayerBefore);
+    fixture.snapshots.remove(second.value.structureId);
+    fixture.runtime.players.delete(created.value.id);
+
+    const recovery = new RecoveryRunner(
+        fixture.state,
+        fixture.runtime,
+        fixture.snapshots,
+        fixture.coordinator,
+        fixture.inventory,
+    );
+    const result = recovery.run();
+
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.equal(fixture.runtime.get(created.value.id)?.alive, true);
+    assert.equal(fixture.inventoryAccess.playerExperience.get(operator.playerId), 17);
+    assert.equal(fixture.inventoryAccess.playerExperience.get(`fake:${pendingRecord.id}`), 13);
+    const recovered = fixture.state.loadCatalog();
+    assert.equal(recovered.ok, true);
+    if (!recovered.ok) return;
+    const record = recovered.state.value.records[pendingRecord.id];
+    assert.equal(record?.totalExperience, 13);
+    assert.equal(record?.inventoryRevision, 2);
+    assert.equal(record?.inventoryFallbackRevision, 1);
+    const remaining = fixture.state.loadOperations();
+    assert.equal(remaining.ok, true);
+    if (remaining.ok) assert.deepEqual(remaining.state.value.experienceTransfers, {});
 });
 
 test("recovery rebuilds a missing online fake player from a committed after snapshot", () => {

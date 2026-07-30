@@ -231,6 +231,7 @@ function createFixture() {
         respawnMode: "manual" as const,
         respawnLocation: null,
         inventoryRevision: null,
+        inventoryFallbackRevision: null,
         lastCheckpointTick: null,
         behavior: createDefaultBehaviorConfig(),
     };

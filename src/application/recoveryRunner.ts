@@ -1,7 +1,12 @@
 import { advanceLifecycleOperation, transitionLifecycle } from "../domain/lifecycle.js";
 import type { FakePlayerRecord, LifecycleOperation, WorldCatalog } from "../domain/model.js";
 import { err, ok, type Result } from "../domain/results.js";
-import { InventoryService, snapshotId } from "./inventoryService.js";
+import {
+    availableInventoryFallbackRevision,
+    InventoryService,
+    restoreInventorySnapshot,
+    snapshotId,
+} from "./inventoryService.js";
 import { commitCatalogRecord, commitCatalogRemoval } from "./lifecycleService.js";
 import { OperationCoordinator } from "./operationCoordinator.js";
 import type { FakePlayerRuntime, InventorySnapshotStore, WorldStateStore } from "./ports.js";
@@ -83,8 +88,11 @@ export class RecoveryRunner {
         catalog: WorldCatalog,
         operations: import("../domain/model.js").PendingOperations,
     ): Result<void> {
+        const inventoryTransferIds = new Set(
+            Object.values(operations.inventoryTransfers).map((transfer) => transfer.fakePlayerId),
+        );
         const ids = new Set([
-            ...Object.values(operations.inventoryTransfers).map((transfer) => transfer.fakePlayerId),
+            ...inventoryTransferIds,
             ...Object.values(operations.experienceTransfers).map((transfer) => transfer.fakePlayerId),
         ]);
         for (const id of [...ids].sort()) {
@@ -95,10 +103,32 @@ export class RecoveryRunner {
                 if (!existing.alive) return err("INVALID_STATE", `待恢复事务的在线假人 ${id} 当前未存活。`);
                 continue;
             }
+            const requiresExactSnapshot = inventoryTransferIds.has(id);
+            if (requiresExactSnapshot && record.inventoryRevision === null) {
+                return err("INVALID_STATE", `待恢复库存事务的在线假人 ${id} 没有库存快照。`);
+            }
+            if (requiresExactSnapshot
+                && !this.snapshots.has(snapshotId(id, record.inventoryRevision as number))) {
+                return err("NOT_FOUND", `待恢复库存事务的精确快照 ${record.inventoryRevision} 不存在。`);
+            }
             this.runtime.spawn(spawnRequest(record));
             if (record.inventoryRevision === null) continue;
-            const restored = this.snapshots.restore(id, snapshotId(id, record.inventoryRevision));
-            if (!restored.ok) return restored;
+            if (requiresExactSnapshot) {
+                const restored = this.snapshots.restore(id, snapshotId(id, record.inventoryRevision));
+                if (!restored.ok) {
+                    return this.runtime.disconnect(id)
+                        ? restored
+                        : err("CONFLICT", `${restored.error.message}；且无法断开未恢复库存的假人 ${id}。`);
+                }
+                continue;
+            }
+            const restored = restoreInventorySnapshot(this.snapshots, record);
+            if (!restored.ok) {
+                return this.runtime.disconnect(id)
+                    ? restored
+                    : err("CONFLICT", `${restored.error.message}；且无法断开未恢复库存的假人 ${id}。`);
+            }
+            if (restored.value.usedFallback) this.inventory.markDirty(id);
         }
         return ok(undefined);
     }
@@ -201,6 +231,7 @@ export class RecoveryRunner {
         let currentCatalog = catalog;
         let currentCatalogRevision = catalogRevision;
         let snapshotRevision = verifiedRevision;
+        let usedPriorSnapshot = false;
         if (snapshotRevision === undefined) {
             if (this.runtime.get(record.id) === undefined) {
                 return err("INVALID_STATE", `${record.id} 在未验证快照阶段缺少在线实例。`);
@@ -220,17 +251,45 @@ export class RecoveryRunner {
             currentCatalog = committed.value.catalog;
             currentCatalogRevision = committed.value.catalogRevision;
         } else if (!this.snapshots.has(snapshotId(record.id, snapshotRevision))) {
-            return err("NOT_FOUND", `${record.id} 已验证的库存快照 ${snapshotRevision} 不存在。`);
+            const priorRevision = availableInventoryFallbackRevision(this.snapshots, pending);
+            if (priorRevision === null) {
+                return err(
+                    "NOT_FOUND",
+                    `${record.id} 已验证的库存快照 ${snapshotRevision} 不存在，且没有可用的旧快照。`,
+                );
+            }
+            snapshotRevision = priorRevision;
+            usedPriorSnapshot = true;
         }
         const offline = transitionLifecycle(pending, pending.recordRevision, { kind: "offline" });
         if (!offline.ok) return offline;
-        const finalRecord: FakePlayerRecord = { ...offline.value, inventoryRevision: snapshotRevision };
+        const fallbackRevision = usedPriorSnapshot
+            ? pending.inventoryRevision === snapshotRevision
+                && pending.inventoryFallbackRevision !== null
+                && this.snapshots.has(snapshotId(record.id, pending.inventoryFallbackRevision))
+                ? pending.inventoryFallbackRevision
+                : null
+            : availableInventoryFallbackRevision(this.snapshots, pending);
+        const finalRecord: FakePlayerRecord = {
+            ...offline.value,
+            inventoryRevision: snapshotRevision,
+            inventoryFallbackRevision: fallbackRevision,
+            ...(usedPriorSnapshot ? { lastCheckpointTick: null } : {}),
+        };
         const committed = commitCatalogRecord(this.stateStore, currentCatalogRevision, currentCatalog, finalRecord);
         if (!committed.ok) return committed;
+        if (pending.inventoryFallbackRevision !== null
+            && pending.inventoryFallbackRevision !== snapshotRevision
+            && pending.inventoryFallbackRevision !== fallbackRevision) {
+            const removed = this.snapshots.remove(snapshotId(record.id, pending.inventoryFallbackRevision));
+            if (!removed.ok) return removed;
+        }
         if (this.runtime.get(record.id) !== undefined && !this.runtime.disconnect(record.id)) {
             return err("CONFLICT", `恢复快照后无法断开假人 ${record.id}。`);
         }
-        return ok("completed snapshotting");
+        return ok(usedPriorSnapshot
+            ? `已从旧库存快照 ${snapshotRevision} 完成下线恢复`
+            : "completed snapshotting");
     }
 
     private finishRestoring(
@@ -238,15 +297,31 @@ export class RecoveryRunner {
         catalog: WorldCatalog,
         record: FakePlayerRecord,
     ): Result<string> {
-        if (this.runtime.get(record.id) === undefined) this.runtime.spawn(spawnRequest(record));
-        if (record.inventoryRevision !== null) {
-            const restored = this.snapshots.restore(record.id, snapshotId(record.id, record.inventoryRevision));
-            if (!restored.ok) return restored;
+        const spawned = this.runtime.get(record.id) === undefined;
+        if (spawned) this.runtime.spawn(spawnRequest(record));
+        const restored = restoreInventorySnapshot(this.snapshots, record);
+        if (!restored.ok) {
+            if (!spawned) return restored;
+            return this.runtime.disconnect(record.id)
+                ? restored
+                : err("CONFLICT", `${restored.error.message}；且无法断开未恢复库存的假人 ${record.id}。`);
         }
         const online = transitionLifecycle(record, record.recordRevision, { kind: "online" });
         if (!online.ok) return online;
-        const committed = commitCatalogRecord(this.stateStore, catalogRevision, catalog, online.value);
-        return committed.ok ? ok("completed restoring") : committed;
+        const finalRecord: FakePlayerRecord = restored.value.usedFallback
+            ? {
+                ...online.value,
+                inventoryRevision: restored.value.inventoryRevision,
+                inventoryFallbackRevision: restored.value.inventoryFallbackRevision,
+                lastCheckpointTick: null,
+            }
+            : online.value;
+        const committed = commitCatalogRecord(this.stateStore, catalogRevision, catalog, finalRecord);
+        return committed.ok
+            ? ok(restored.value.usedFallback
+                ? `已从上一代库存快照 ${restored.value.inventoryRevision} 完成恢复`
+                : "completed restoring")
+            : committed;
     }
 
     private finishRenaming(
@@ -263,11 +338,23 @@ export class RecoveryRunner {
             if (existing !== undefined && existing.name !== operation.targetName && !this.runtime.disconnect(record.id)) {
                 return err("CONFLICT", `无法断开旧名称假人 ${record.id}。`);
             }
-            if (this.runtime.get(record.id) === undefined) this.runtime.spawn(spawnRequest(record));
-            if (record.inventoryRevision !== null) {
-                const restored = this.snapshots.restore(record.id, snapshotId(record.id, record.inventoryRevision));
-                if (!restored.ok) return restored;
+            const spawned = this.runtime.get(record.id) === undefined;
+            if (spawned) this.runtime.spawn(spawnRequest(record));
+            const restored = restoreInventorySnapshot(this.snapshots, record);
+            if (!restored.ok) {
+                if (!spawned) return restored;
+                return this.runtime.disconnect(record.id)
+                    ? restored
+                    : err("CONFLICT", `${restored.error.message}；且无法断开未恢复库存的假人 ${record.id}。`);
             }
+            record = restored.value.usedFallback
+                ? {
+                    ...record,
+                    inventoryRevision: restored.value.inventoryRevision,
+                    inventoryFallbackRevision: restored.value.inventoryFallbackRevision,
+                    lastCheckpointTick: null,
+                }
+                : record;
         } else if (this.runtime.get(record.id) !== undefined && !this.runtime.disconnect(record.id)) {
             return err("CONFLICT", `无法断开离线重命名假人 ${record.id}。`);
         }
@@ -297,6 +384,10 @@ export class RecoveryRunner {
         if (operation.phase !== "snapshot_removed") {
             if (record.inventoryRevision !== null) {
                 const removed = this.snapshots.remove(snapshotId(record.id, record.inventoryRevision));
+                if (!removed.ok) return removed;
+            }
+            if (record.inventoryFallbackRevision !== null) {
+                const removed = this.snapshots.remove(snapshotId(record.id, record.inventoryFallbackRevision));
                 if (!removed.ok) return removed;
             }
             const advanced = advanceLifecycleOperation(currentRecord, currentRecord.recordRevision, "snapshot_removed");
@@ -377,9 +468,16 @@ export class RecoveryRunner {
             selectedSlot: runtimeState.selectedSlot,
             totalExperience: runtimeState.totalExperience,
             inventoryRevision: snapshotRevision,
+            inventoryFallbackRevision: null,
         };
         const committed = commitCatalogRecord(this.stateStore, currentRevision, currentCatalog, finalRecord);
-        return committed.ok ? ok("completed respawning") : committed;
+        if (!committed.ok) return committed;
+        for (const revision of [record.inventoryRevision, record.inventoryFallbackRevision]) {
+            if (revision === null) continue;
+            const removed = this.snapshots.remove(snapshotId(record.id, revision));
+            if (!removed.ok) return removed;
+        }
+        return ok("completed respawning");
     }
 }
 

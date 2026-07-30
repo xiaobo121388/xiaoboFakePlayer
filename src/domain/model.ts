@@ -148,6 +148,7 @@ export interface FakePlayerRecord {
     readonly respawnMode: RespawnMode;
     readonly respawnLocation: SavedLocation | null;
     readonly inventoryRevision: number | null;
+    readonly inventoryFallbackRevision: number | null;
     readonly lastCheckpointTick: number | null;
     readonly behavior: BehaviorConfig;
 }
@@ -188,6 +189,7 @@ export interface InventoryTransfer {
     readonly playerId: PlayerPersistentId;
     readonly fakePlayerRevision: number;
     readonly fakeSnapshotId: string;
+    readonly fakeFallbackSnapshotId?: string;
     readonly fakeAfterSnapshotId: string;
     readonly request: InventoryTransferRequest;
     readonly beforeStructureId: string;

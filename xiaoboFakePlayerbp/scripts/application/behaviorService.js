@@ -9,9 +9,18 @@ const MAX_BLOCK_READS_PER_TICK = 256;
 const ATTACK_QUERY_LIMIT = 16;
 // 挂机假人的“面前”语义是眼睛视线 7 格内的首个方块命中。
 const FRONT_MINE_RAY_DISTANCE = 7;
+const FRONT_PLACE_RAY_DISTANCE = 7;
 // 非射线目标没有原生命中面，以眼睛位置推导破坏面。
 const MINE_EYE_HEIGHT = 1.62;
-const AUTOMATIC_BEHAVIORS = ["follow", "attack", "mine", "use"];
+const AUTOMATIC_BEHAVIORS = ["follow", "attack", "mine", "place", "use"];
+const PLACEMENT_SUPPORTS = [
+    { offset: { x: 0, y: -1, z: 0 }, face: "up" },
+    { offset: { x: 0, y: 1, z: 0 }, face: "down" },
+    { offset: { x: 0, y: 0, z: -1 }, face: "south" },
+    { offset: { x: 0, y: 0, z: 1 }, face: "north" },
+    { offset: { x: -1, y: 0, z: 0 }, face: "east" },
+    { offset: { x: 1, y: 0, z: 0 }, face: "west" },
+];
 export class BehaviorService {
     stateStore;
     runtime;
@@ -170,7 +179,8 @@ export class BehaviorService {
                 continue;
             if ((this.nextDueTicks.get(task.key) ?? 0) > currentTick || actedIds.has(task.record.id))
                 continue;
-            if (task.kind === "mine" && blockReads >= MAX_BLOCK_READS_PER_TICK)
+            if ((task.kind === "mine" || task.kind === "place")
+                && blockReads >= MAX_BLOCK_READS_PER_TICK)
                 continue;
             this.lastTaskKey = task.key;
             consideredTasks += 1;
@@ -209,6 +219,7 @@ export class BehaviorService {
             case "follow": return this.runFollow(record);
             case "attack": return this.runAttack(record);
             case "mine": return this.runMine(record, blockBudget);
+            case "place": return this.runPlace(record, blockBudget);
             case "use": return this.runUse(record);
         }
     }
@@ -431,6 +442,57 @@ export class BehaviorService {
         });
         return { attempted: true, accepted: receipt.accepted, blockReads: 0 };
     }
+    runPlace(record, blockBudget) {
+        const runtime = this.runtime.get(record.id);
+        if (runtime === undefined || blockBudget <= 0)
+            return emptyOutcome(true);
+        const config = record.behavior.place;
+        if (config.mode === "front") {
+            const hit = this.worldQueries.getBlockFromViewDirection(record.id, FRONT_PLACE_RAY_DISTANCE);
+            if (hit === undefined || hit.distance > MAX_INTERACTION_DISTANCE)
+                return emptyOutcome();
+            if (blockBudget < 2)
+                return emptyOutcome(true);
+            const support = this.worldQueries.getBlockInfo(runtime.dimension, hit.position);
+            const target = addPoints(hit.position, faceOffset(hit.face));
+            const targetInfo = this.worldQueries.getBlockInfo(runtime.dimension, target);
+            if (support?.solid !== true || !isAirBlock(targetInfo)) {
+                return { attempted: false, accepted: false, blockReads: 2 };
+            }
+            const receipt = this.executeRuntime(record.id, {
+                kind: "use_item_on_block",
+                slot: config.slot,
+                position: hit.position,
+                face: hit.face,
+            });
+            return { attempted: true, accepted: receipt.accepted, blockReads: 2 };
+        }
+        const target = config.position;
+        if (target === null)
+            return emptyOutcome();
+        const targetInfo = this.worldQueries.getBlockInfo(runtime.dimension, target);
+        let blockReads = 1;
+        if (!isAirBlock(targetInfo))
+            return { attempted: false, accepted: false, blockReads };
+        for (const candidate of PLACEMENT_SUPPORTS) {
+            if (blockReads >= blockBudget) {
+                return { attempted: false, accepted: false, blockReads, continueNextTick: true };
+            }
+            const supportPosition = addPoints(target, candidate.offset);
+            const support = this.worldQueries.getBlockInfo(runtime.dimension, supportPosition);
+            blockReads += 1;
+            if (support?.solid !== true || !this.worldQueries.hasBlockLineOfSight(record.id, runtime.dimension, supportPosition, MAX_INTERACTION_DISTANCE))
+                continue;
+            const receipt = this.executeRuntime(record.id, {
+                kind: "use_item_on_block",
+                slot: config.slot,
+                position: supportPosition,
+                face: candidate.face,
+            });
+            return { attempted: true, accepted: receipt.accepted, blockReads };
+        }
+        return { attempted: false, accepted: false, blockReads };
+    }
     stopFollowing(id) {
         if (!this.following.delete(id))
             return emptyOutcome();
@@ -498,6 +560,21 @@ function behaviorConfigsEqual(left, right) {
 }
 function isMineTarget(info, typeId) {
     return info !== undefined && info.solid && (typeId === null || info.typeId === typeId);
+}
+function isAirBlock(info) {
+    return info !== undefined && (info.typeId === "minecraft:air"
+        || info.typeId === "minecraft:cave_air"
+        || info.typeId === "minecraft:void_air");
+}
+function faceOffset(face) {
+    switch (face) {
+        case "down": return { x: 0, y: -1, z: 0 };
+        case "east": return { x: 1, y: 0, z: 0 };
+        case "north": return { x: 0, y: 0, z: -1 };
+        case "south": return { x: 0, y: 0, z: 1 };
+        case "up": return { x: 0, y: 1, z: 0 };
+        case "west": return { x: -1, y: 0, z: 0 };
+    }
 }
 function describeMine(record, state, position, info) {
     const config = record.behavior.mine;

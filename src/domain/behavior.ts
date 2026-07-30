@@ -28,6 +28,7 @@ export function createDefaultBehaviorConfig(): BehaviorConfig {
             searchRadius: 0,
             approach: false,
         },
+        place: createDefaultPlaceConfig(),
         use: {
             enabled: false,
             intervalTicks: 20,
@@ -42,10 +43,12 @@ export function decodeBehaviorConfig(payload: unknown): BehaviorConfig | undefin
     const follow = decodeFollow(value.follow);
     const attack = decodeAttack(value.attack);
     const mine = decodeMine(value.mine);
+    const place = value.place === undefined ? createDefaultPlaceConfig() : decodePlace(value.place);
     const use = decodeUse(value.use);
-    return follow === undefined || attack === undefined || mine === undefined || use === undefined
+    return follow === undefined || attack === undefined || mine === undefined
+        || place === undefined || use === undefined
         ? undefined
-        : { follow, attack, mine, use };
+        : { follow, attack, mine, place, use };
 }
 
 function decodeFollow(payload: unknown): BehaviorConfig["follow"] | undefined {
@@ -111,6 +114,49 @@ function decodeMine(payload: unknown): BehaviorConfig["mine"] | undefined {
         searchRadius: value.searchRadius,
         approach: value.approach,
     };
+}
+
+function createDefaultPlaceConfig(): BehaviorConfig["place"] {
+    return {
+        enabled: false,
+        intervalTicks: 10,
+        mode: "front",
+        position: null,
+        slot: 0,
+    };
+}
+
+function decodePlace(payload: unknown): BehaviorConfig["place"] | undefined {
+    const value = asObject(payload);
+    const position = value === undefined || value.position === null
+        ? null
+        : decodeBlockPosition(value.position);
+    if (value === undefined
+        || typeof value.enabled !== "boolean"
+        || !isIntegerInRange(value.intervalTicks, 1, MAX_INTERVAL_TICKS)
+        || !isOneOf(value.mode, ["front", "position"])
+        || position === undefined
+        || (value.enabled && value.mode === "position" && position === null)
+        || !isIntegerInRange(value.slot, 0, 35)) {
+        return undefined;
+    }
+    return {
+        enabled: value.enabled,
+        intervalTicks: value.intervalTicks,
+        mode: value.mode,
+        position,
+        slot: value.slot,
+    };
+}
+
+function decodeBlockPosition(payload: unknown): BehaviorConfig["place"]["position"] | undefined {
+    const value = asObject(payload);
+    return value !== undefined
+        && Number.isSafeInteger(value.x)
+        && Number.isSafeInteger(value.y)
+        && Number.isSafeInteger(value.z)
+        ? { x: value.x as number, y: value.y as number, z: value.z as number }
+        : undefined;
 }
 
 function decodeUse(payload: unknown): BehaviorConfig["use"] | undefined {

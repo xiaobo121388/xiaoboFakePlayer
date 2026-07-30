@@ -52,7 +52,7 @@ application 端口只接收稳定 ID、自有坐标、结构 ID、逻辑槽位�
 6. active 缺失或损坏时才恢复到最高有效 bank，并报告诊断。
 7. 部分键存在但两个 bank 都损坏时进入只读隔离，不能用空默认值覆盖世界数据。
 
-当前 schema：catalog 3、permissions 1、operations 2。catalog schema 1/2 在内存迁移，旧记录获得默认行为配置和默认皮肤，再通过正常提交路径写入新 schema。
+当前 schema：catalog 3、permissions 1、operations 2。catalog schema 1/2 在内存迁移，旧记录获得默认行为配置和默认皮肤；既有 schema 3 记录缺少新增的 `place` 行为子配置时，也会在内存中补为默认关闭状态，再通过正常提交路径持久化。
 
 ## 生命周期
 

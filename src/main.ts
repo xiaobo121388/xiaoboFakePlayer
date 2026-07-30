@@ -122,8 +122,17 @@ system.runInterval(() => {
 	try {
 		const result = inventory.checkpointNext(system.currentTick);
 		if (!result.ok) console.error(`[xiaobo-fake-player] periodic checkpoint failed: ${result.error.message}`);
-		const respawned = lifecycle.autoRespawnNext();
-		if (!respawned.ok) console.error(`[xiaobo-fake-player] auto respawn poll failed: ${respawned.error.message}`);
+	} catch (cause) {
+		const message = cause instanceof Error ? cause.message : String(cause);
+		console.error(`[xiaobo-fake-player] periodic checkpoint tick crashed: ${message}`);
+	}
+}, 2);
+
+system.runInterval(() => {
+	if (startupStatus.state !== "ready") return;
+	try {
+		const result = lifecycle.autoRespawnNext();
+		if (!result.ok) console.error(`[xiaobo-fake-player] auto respawn poll failed: ${result.error.message}`);
 	} catch (cause) {
 		const message = cause instanceof Error ? cause.message : String(cause);
 		console.error(`[xiaobo-fake-player] periodic lifecycle tick crashed: ${message}`);

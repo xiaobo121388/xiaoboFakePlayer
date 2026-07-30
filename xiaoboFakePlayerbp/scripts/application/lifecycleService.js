@@ -281,17 +281,8 @@ export class LifecycleService {
         if (context.value.record.lifecycle.kind !== "offline") {
             return err("INVALID_STATE", "无损回收只允许从 offline 状态开始，请先安全下线。");
         }
-        const inventoryTransfer = this.inventory.transferItems(actor, id, context.value.record.recordRevision, { kind: "recycle_all" });
-        if (!inventoryTransfer.ok)
-            return inventoryTransfer;
-        let record = inventoryTransfer.value;
-        if (record.totalExperience > 0) {
-            const experienceTransfer = this.inventory.transferExperience(actor, id, record.recordRevision, record.totalExperience);
-            if (!experienceTransfer.ok)
-                return experienceTransfer;
-            record = experienceTransfer.value;
-        }
-        return this.purge(actor, id, record.recordRevision);
+        const recycled = this.inventory.recycleContents(actor, id, context.value.record.recordRevision);
+        return recycled.ok ? this.purge(actor, id, recycled.value.recordRevision) : recycled;
     }
     respawn(actor, id, expectedRecordRevision) {
         const authorization = this.authorize(actor, "manage");

@@ -153,6 +153,12 @@ export class InventoryService {
             lease.value.release();
         }
     }
+    recycleContents(actor, id, expectedRecordRevision) {
+        const items = this.transferItems(actor, id, expectedRecordRevision, { kind: "recycle_all" });
+        if (!items.ok || items.value.totalExperience === 0)
+            return items;
+        return this.transferExperience(actor, id, items.value.recordRevision, items.value.totalExperience);
+    }
     listPendingTransfers(actor) {
         if (!actor.isOperator)
             return err("PERMISSION_DENIED", "只有 OP 可以查看待恢复事务。");
@@ -711,8 +717,16 @@ function createInventoryTransfer(record, playerId, request) {
 function validateTransferRequest(request) {
     switch (request.kind) {
         case "recycle_all":
+        case "swap_inventory":
+        case "swap_equipment":
             return ok(undefined);
         case "swap":
+            if (!validSlot(request.fakeSlot, TOTAL_SLOT_COUNT)) {
+                return err("INVALID_SLOT", `无效假人槽位：${request.fakeSlot}。`);
+            }
+            return validSlot(request.playerSlot, TOTAL_SLOT_COUNT)
+                ? ok(undefined)
+                : err("INVALID_SLOT", `无效玩家槽位：${request.playerSlot}。`);
         case "take":
         case "put":
             if (!validSlot(request.fakeSlot, TOTAL_SLOT_COUNT)) {

@@ -20,16 +20,38 @@ export async function openInventoryForm(player, services, record, onBack) {
                 overview.lastCheckpointTick === null ? "-" : String(overview.lastCheckpointTick),
             ],
         });
-        for (const slot of overview.slots) {
-            form.button(slotButtonLabel(slot, overview.selectedSlot));
-            actions.push(() => openSlotForm(player, services, record, overview, slot, onBack));
-        }
+        form.button(t("xiaobo.fp.form.inventory.swap_mainhand"));
+        actions.push(() => runTransfer(player, services, record, overview, {
+            kind: "swap",
+            fakeSlot: overview.selectedSlot,
+            playerSlot: player.selectedSlotIndex,
+        }, onBack));
+        form.button(t("xiaobo.fp.form.inventory.swap_offhand"));
+        actions.push(() => runTransfer(player, services, record, overview, {
+            kind: "swap",
+            fakeSlot: 40,
+            playerSlot: 40,
+        }, onBack));
+        form.button(t("xiaobo.fp.form.inventory.swap_inventory"));
+        actions.push(() => runTransfer(player, services, record, overview, {
+            kind: "swap_inventory",
+        }, onBack));
+        form.button(t("xiaobo.fp.form.inventory.swap_equipment"));
+        actions.push(() => runTransfer(player, services, record, overview, {
+            kind: "swap_equipment",
+        }, onBack));
         form.button(t("xiaobo.fp.form.inventory.internal_swap"));
         actions.push(() => openInternalSwapForm(player, services, record, overview, onBack));
         form.button(t("xiaobo.fp.form.inventory.experience"));
         actions.push(() => openExperienceForm(player, services, record, overview, onBack));
         form.button(t("xiaobo.fp.form.inventory.recycle_all"));
         actions.push(() => confirmRecycleAll(player, services, record, overview, onBack));
+        form.button(t("xiaobo.fp.form.inventory.recycle_contents"));
+        actions.push(() => confirmRecycleContents(player, services, record, overview, onBack));
+        for (const slot of overview.slots) {
+            form.button(slotButtonLabel(slot, overview.selectedSlot));
+            actions.push(() => openSlotForm(player, services, record, overview, slot, onBack));
+        }
         form.button(t("xiaobo.fp.form.back"));
         actions.push(() => onBack(record));
         const response = await form.show(player);
@@ -116,6 +138,21 @@ async function confirmRecycleAll(player, services, record, overview, onBack) {
     if (response.canceled || response.selection !== 1 || !ready(player, services))
         return;
     await runTransfer(player, services, record, overview, { kind: "recycle_all" }, onBack);
+}
+async function confirmRecycleContents(player, services, record, overview, onBack) {
+    const response = await new MessageFormData()
+        .title(t("xiaobo.fp.form.inventory.recycle_contents"))
+        .body(t("xiaobo.fp.form.inventory.recycle_contents_body"))
+        .button1(t("xiaobo.fp.form.cancel"))
+        .button2(t("xiaobo.fp.form.inventory.confirm"))
+        .show(player);
+    if (response.canceled || response.selection !== 1 || !ready(player, services))
+        return;
+    const result = services.inventory.recycleContents(actorIdentity(player), record.id, overview.recordRevision);
+    if (!result.ok)
+        return sendError(player, result.error.message);
+    player.sendMessage({ translate: "xiaobo.fp.message.inventory_recycled", with: [result.value.name] });
+    await openInventoryForm(player, services, result.value, onBack);
 }
 async function runTransfer(player, services, record, overview, request, onBack) {
     if (!ready(player, services))

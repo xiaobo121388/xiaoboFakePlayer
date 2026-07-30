@@ -72,16 +72,27 @@ export interface RuntimeInventorySlot {
 
 export type BlockFace = "down" | "east" | "north" | "south" | "up" | "west";
 
+export type RuntimeBlockInteractionSelection =
+    | { readonly mode: "item"; readonly slot: number; readonly emptyHand: boolean }
+    | { readonly mode: "slot"; readonly slot: number };
+
 export type RuntimeFakePlayerAction =
     | { readonly kind: "attack_entity"; readonly targetId: string }
     | { readonly kind: "break_block"; readonly position: Point; readonly face: BlockFace }
     | {
+        readonly kind: "build_block";
+        readonly position: Point;
+        readonly face: BlockFace;
+        readonly aim?: Point;
+        readonly target: Point;
+        readonly selection: RuntimeBlockInteractionSelection;
+    }
+    | {
         readonly kind: "interact_block";
         readonly position: Point;
         readonly face: BlockFace;
-        readonly selection?:
-            | { readonly mode: "item"; readonly slot: number; readonly emptyHand: boolean }
-            | { readonly mode: "slot"; readonly slot: number };
+        readonly aim?: Point;
+        readonly selection?: RuntimeBlockInteractionSelection;
     }
     | { readonly kind: "interact_entity"; readonly targetId: string }
     | { readonly kind: "jump" }

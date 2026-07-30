@@ -99,6 +99,7 @@ class MemoryRuntime implements FakePlayerRuntime {
         if (action.kind === "navigate") return { accepted: true, fullPath: true };
         const changesInventory = action.kind === "attack_entity"
             || action.kind === "break_block"
+            || action.kind === "build_block"
             || action.kind === "interact_block"
             || action.kind === "interact_entity"
             || action.kind === "place_block_direct"
@@ -346,7 +347,7 @@ test("navigation validates speed and reports whether a full path exists", () => 
     });
 });
 
-test("block interactions require a solid loaded visible block within reach", () => {
+test("block breaking requires a solid loaded visible block within reach", () => {
     const fixture = createFixture();
     const operator = { playerId: "operator", isOperator: true };
     const action = {
@@ -370,6 +371,28 @@ test("block interactions require a solid loaded visible block within reach", () 
         kind: "break_block",
         position: { x: 1, y: 64, z: -2 },
         face: "up",
+    }]);
+});
+
+test("block interaction accepts a visible non-solid button", () => {
+    const fixture = createFixture();
+    const operator = { playerId: "operator", isOperator: true };
+    fixture.queries.solid = false;
+    fixture.queries.blockInfo = { typeId: "minecraft:stone_button", solid: false };
+
+    assert.deepEqual(fixture.service.perform(operator, fixture.record.id, 4, {
+        kind: "interact_block",
+        dimension: "minecraft:overworld",
+        position: { x: 1, y: 64, z: 0 },
+        face: "south",
+    }), {
+        ok: true,
+        value: { accepted: true, inventoryChanged: true },
+    });
+    assert.deepEqual(fixture.runtime.actions, [{
+        kind: "interact_block",
+        position: { x: 1, y: 64, z: 0 },
+        face: "south",
     }]);
 });
 
@@ -1011,9 +1034,11 @@ test("automatic front placement uses the exact face hit by the eye ray", () => {
         assert.match(result.value.placeDiagnostic ?? "", /state=accepted/);
     }
     assert.deepEqual(fixture.runtime.actions, [{
-        kind: "interact_block",
+        kind: "build_block",
         position: { x: 2, y: 65, z: 2 },
         face: "west",
+        aim: { x: 2, y: 65.25, z: 2.75 },
+        target: { x: 1, y: 65, z: 2 },
         selection: { mode: "slot", slot: 4 },
     }]);
     assert.deepEqual(fixture.queries.viewBlockMaxDistances, [7]);
@@ -1083,6 +1108,7 @@ test("automatic interaction resolves an item on every run and supports empty han
         kind: "interact_block",
         position: { x: 2, y: 65, z: 2 },
         face: "west",
+        aim: { x: 2, y: 65.25, z: 2.75 },
         selection: { mode: "item", slot: 5, emptyHand: false },
     });
     fixture.runtime.inventorySlots.delete(5);
@@ -1092,6 +1118,7 @@ test("automatic interaction resolves an item on every run and supports empty han
         kind: "interact_block",
         position: { x: 2, y: 65, z: 2 },
         face: "west",
+        aim: { x: 2, y: 65.25, z: 2.75 },
         selection: { mode: "item", slot: 8, emptyHand: false },
     });
 
@@ -1117,8 +1144,87 @@ test("automatic interaction resolves an item on every run and supports empty han
         kind: "interact_block",
         position: { x: 2, y: 65, z: 2 },
         face: "west",
+        aim: { x: 2, y: 65.25, z: 2.75 },
         selection: { mode: "item", slot: 0, emptyHand: true },
     });
+});
+
+test("automatic empty-hand interaction activates a non-solid button without requiring an empty placement cell", () => {
+    const fixture = createFixture();
+    const operator = { playerId: "operator", isOperator: true };
+    const defaults = createDefaultBehaviorConfig();
+    fixture.queries.viewBlockHit = {
+        position: { x: 2, y: 65, z: 2 },
+        face: "west",
+        faceLocation: { x: 0, y: 0.5, z: 0.5 },
+        distance: 3,
+    };
+    fixture.queries.blockInfoByPosition.set("2:65:2", { typeId: "minecraft:stone_button", solid: false });
+    fixture.queries.blockInfoByPosition.set("1:65:2", { typeId: "minecraft:stone", solid: true });
+    assert.equal(fixture.service.updateBehaviorConfig(
+        operator,
+        fixture.record.id,
+        4,
+        fixture.record.behavior,
+        {
+            ...defaults,
+            place: {
+                ...defaults.place,
+                enabled: true,
+                selectionMode: "item",
+                itemTypeId: null,
+            },
+        },
+    ).ok, true);
+    fixture.runtime.actions.length = 0;
+
+    const result = fixture.service.tick(0);
+
+    assert.equal(result.ok, true);
+    if (result.ok) {
+        assert.equal(result.value.blockReads, 1);
+        assert.match(result.value.placeDiagnostic ?? "", /state=accepted/);
+    }
+    assert.deepEqual(fixture.runtime.actions, [{
+        kind: "interact_block",
+        position: { x: 2, y: 65, z: 2 },
+        face: "west",
+        aim: { x: 2, y: 65.5, z: 2.5 },
+        selection: { mode: "item", slot: 0, emptyHand: true },
+    }]);
+});
+
+test("automatic interaction activates a non-solid button while holding a placeable block", () => {
+    const fixture = createFixture();
+    const operator = { playerId: "operator", isOperator: true };
+    const defaults = createDefaultBehaviorConfig();
+    fixture.queries.viewBlockHit = {
+        position: { x: 2, y: 65, z: 2 },
+        face: "west",
+        faceLocation: { x: 0, y: 0.5, z: 0.5 },
+        distance: 3,
+    };
+    fixture.queries.blockInfoByPosition.set("2:65:2", { typeId: "minecraft:stone_button", solid: false });
+    assert.equal(fixture.service.updateBehaviorConfig(
+        operator,
+        fixture.record.id,
+        4,
+        fixture.record.behavior,
+        { ...defaults, place: { ...defaults.place, enabled: true, slot: 4 } },
+    ).ok, true);
+    fixture.runtime.actions.length = 0;
+
+    const result = fixture.service.tick(0);
+
+    assert.equal(result.ok, true);
+    if (result.ok) assert.equal(result.value.blockReads, 1);
+    assert.deepEqual(fixture.runtime.actions, [{
+        kind: "interact_block",
+        position: { x: 2, y: 65, z: 2 },
+        face: "west",
+        aim: { x: 2, y: 65.5, z: 2.5 },
+        selection: { mode: "slot", slot: 4 },
+    }]);
 });
 
 test("automatic interaction skips the action when the configured item is missing", () => {
@@ -1182,13 +1288,14 @@ test("automatic front chest placement directly places only while sneaking", () =
     const result = fixture.service.tick(0);
     assert.equal(result.ok, true);
     if (result.ok) {
-        assert.equal(result.value.blockReads, 2);
+        assert.equal(result.value.blockReads, 1);
         assert.match(result.value.placeDiagnostic ?? "", /state=accepted/);
     }
     assert.deepEqual(fixture.runtime.actions, [{
         kind: "interact_block",
         position: { x: 2, y: 65, z: 2 },
         face: "west",
+        aim: { x: 2, y: 65.25, z: 2.75 },
         selection: { mode: "slot", slot: 4 },
     }]);
 
@@ -1243,9 +1350,10 @@ test("automatic coordinate placement resolves the target cell to an adjacent sup
         assert.match(result.value.placeDiagnostic ?? "", /state=accepted/);
     }
     assert.deepEqual(fixture.runtime.actions, [{
-        kind: "interact_block",
+        kind: "build_block",
         position: { x: 3, y: 63, z: 0 },
         face: "up",
+        target: { x: 3, y: 64, z: 0 },
         selection: { mode: "slot", slot: 2 },
     }]);
 });
@@ -1322,6 +1430,45 @@ test("automatic coordinate interaction uses an empty hand on chest support", () 
     }]);
 });
 
+test("automatic coordinate interaction activates a non-solid button at the configured position", () => {
+    const fixture = createFixture();
+    const operator = { playerId: "operator", isOperator: true };
+    const defaults = createDefaultBehaviorConfig();
+    fixture.queries.blockInfoByPosition.set("3:64:0", { typeId: "minecraft:stone_button", solid: false });
+    assert.equal(fixture.service.updateBehaviorConfig(
+        operator,
+        fixture.record.id,
+        4,
+        fixture.record.behavior,
+        {
+            ...defaults,
+            place: {
+                ...defaults.place,
+                enabled: true,
+                mode: "position",
+                position: { x: 3, y: 64, z: 0 },
+                selectionMode: "item",
+                itemTypeId: null,
+            },
+        },
+    ).ok, true);
+    fixture.runtime.actions.length = 0;
+
+    const result = fixture.service.tick(0);
+
+    assert.equal(result.ok, true);
+    if (result.ok) {
+        assert.equal(result.value.blockReads, 1);
+        assert.match(result.value.placeDiagnostic ?? "", /state=accepted/);
+    }
+    assert.deepEqual(fixture.runtime.actions, [{
+        kind: "interact_block",
+        position: { x: 3, y: 64, z: 0 },
+        face: "west",
+        selection: { mode: "item", slot: 0, emptyHand: true },
+    }]);
+});
+
 test("automatic coordinate placement delegates support reachability to the runtime", () => {
     const fixture = createFixture();
     const operator = { playerId: "operator", isOperator: true };
@@ -1359,9 +1506,10 @@ test("automatic coordinate placement delegates support reachability to the runti
     assert.equal(delegated.ok, true);
     if (delegated.ok) assert.match(delegated.value.placeDiagnostic ?? "", /state=accepted/);
     assert.deepEqual(fixture.runtime.actions, [{
-        kind: "interact_block",
+        kind: "build_block",
         position: { x: 3, y: 63, z: 0 },
         face: "up",
+        target: { x: 3, y: 64, z: 0 },
         selection: { mode: "slot", slot: 2 },
     }]);
 });

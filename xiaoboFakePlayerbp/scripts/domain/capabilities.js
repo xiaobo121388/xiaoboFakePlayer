@@ -14,7 +14,7 @@ export const CAPABILITY_MATRIX = {
             id: "automatic_block_placement",
             availability: "enabled",
             verification: "bedrock_26_33_required",
-            detail: "模拟玩家可按视线命中面或指定目标坐标，以指定快捷栏、动态查找物品或空手自动交互并放置方块。",
+            detail: "模拟玩家可按视线命中点或指定坐标，通过原生建造和通用交互动作放置方块、激活按钮等方块。",
         },
         {
             id: "entity_interaction_form",

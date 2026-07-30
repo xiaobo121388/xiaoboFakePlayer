@@ -1,5 +1,5 @@
 import { BlockTypes, Direction, EntityComponentTypes, GameMode, world, } from "@minecraft/server";
-import { getPlayerSkin, PersonaArmSize, PersonaPieceType, SimulatedPlayer, spawnSimulatedPlayer, } from "@minecraft/server-gametest";
+import { getPlayerSkin, LookDuration, PersonaArmSize, PersonaPieceType, SimulatedPlayer, spawnSimulatedPlayer, } from "@minecraft/server-gametest";
 import { HOTBAR_SLOT_COUNT, INVENTORY_SLOT_COUNT } from "../../domain/inventory.js";
 const TAG_PREFIX = "xiaobo_fp_";
 const MAX_EXPERIENCE_CHANGE = 16_777_216;
@@ -114,6 +114,7 @@ export class SapiFakePlayerRuntime {
                     console.warn(message);
                 return { accepted };
             }
+            case "build_block":
             case "interact_block": {
                 const selection = action.selection;
                 if (selection?.mode === "slot") {
@@ -122,7 +123,7 @@ export class SapiFakePlayerRuntime {
                     }
                     player.selectedSlotIndex = selection.slot;
                 }
-                const inventory = selection?.mode === "item"
+                const inventory = action.kind === "build_block" || selection?.mode === "item"
                     ? player.getComponent(EntityComponentTypes.Inventory)
                     : undefined;
                 const container = inventory?.container;
@@ -132,6 +133,9 @@ export class SapiFakePlayerRuntime {
                     : undefined;
                 if (selection?.mode === "item" && container === undefined) {
                     throw new Error(`interact ${id}: 缺少库存容器，无法准备交互物品。`);
+                }
+                if (action.kind === "build_block" && container === undefined) {
+                    throw new Error(`place ${id}: 缺少库存容器，无法准备建造物品。`);
                 }
                 const swapsItem = selection?.mode === "item"
                     && !selection.emptyHand
@@ -144,7 +148,36 @@ export class SapiFakePlayerRuntime {
                         else if (swapsItem)
                             container?.swapItems(selection.slot, selectedSlot, container);
                     }
-                    accepted = player.interactWithBlock(action.position, toDirection(action.face));
+                    if (action.kind === "build_block") {
+                        player.lookAtLocation(action.aim ?? blockFaceCenter(action.position, action.face), LookDuration.Instant);
+                        const target = player.dimension.getBlock(action.target);
+                        if (target === undefined || !target.isAir) {
+                            accepted = false;
+                        }
+                        else {
+                            player.stopBreakingBlock();
+                            const swapsBuildSlot = selectedSlot !== 0;
+                            if (swapsBuildSlot)
+                                container.swapItems(selectedSlot, 0, container);
+                            try {
+                                player.startBuild();
+                                player.stopBuild();
+                                accepted = true;
+                            }
+                            finally {
+                                if (swapsBuildSlot && player.isValid) {
+                                    container.swapItems(selectedSlot, 0, container);
+                                }
+                            }
+                        }
+                    }
+                    else {
+                        if (action.aim === undefined)
+                            player.lookAtBlock(action.position, LookDuration.Instant);
+                        else
+                            player.lookAtLocation(action.aim, LookDuration.Instant);
+                        accepted = player.interact();
+                    }
                 }
                 finally {
                     if (selection?.mode === "item" && player.isValid) {
@@ -414,5 +447,15 @@ function toPlayerSkinData(skin) {
         })),
         ...(skin.skinColor === undefined ? {} : { skinColor: skin.skinColor }),
     };
+}
+function blockFaceCenter(position, face) {
+    switch (face) {
+        case "down": return { x: position.x + 0.5, y: position.y, z: position.z + 0.5 };
+        case "east": return { x: position.x + 1, y: position.y + 0.5, z: position.z + 0.5 };
+        case "north": return { x: position.x + 0.5, y: position.y + 0.5, z: position.z };
+        case "south": return { x: position.x + 0.5, y: position.y + 0.5, z: position.z + 1 };
+        case "up": return { x: position.x + 0.5, y: position.y + 1, z: position.z + 0.5 };
+        case "west": return { x: position.x, y: position.y + 0.5, z: position.z + 0.5 };
+    }
 }
 //# sourceMappingURL=fakePlayerRuntime.js.map

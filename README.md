@@ -1,5 +1,9 @@
 # 小波挂机假人
 
+<p align="center">
+	<strong>简体中文</strong> | <a href="README_EN.md">English</a>
+</p>
+
 面向 Minecraft Bedrock 的模拟玩家管理 Add-on。你可以创建能够保存背包和状态的挂机假人，通过图形界面管理它们，并让它们执行移动、战斗、挖掘、交互和物品操作。
 
 ## 运行要求

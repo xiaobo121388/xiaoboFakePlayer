@@ -1037,7 +1037,7 @@ test("automatic front placement uses the exact face hit by the eye ray", () => {
         kind: "build_block",
         position: { x: 2, y: 65, z: 2 },
         face: "west",
-        aim: { x: 2, y: 65.25, z: 2.75 },
+        preserveView: true,
         target: { x: 1, y: 65, z: 2 },
         selection: { mode: "slot", slot: 4 },
     }]);
@@ -1108,7 +1108,7 @@ test("automatic interaction resolves an item on every run and supports empty han
         kind: "interact_block",
         position: { x: 2, y: 65, z: 2 },
         face: "west",
-        aim: { x: 2, y: 65.25, z: 2.75 },
+        preserveView: true,
         selection: { mode: "item", slot: 5, emptyHand: false },
     });
     fixture.runtime.inventorySlots.delete(5);
@@ -1118,7 +1118,7 @@ test("automatic interaction resolves an item on every run and supports empty han
         kind: "interact_block",
         position: { x: 2, y: 65, z: 2 },
         face: "west",
-        aim: { x: 2, y: 65.25, z: 2.75 },
+        preserveView: true,
         selection: { mode: "item", slot: 8, emptyHand: false },
     });
 
@@ -1144,7 +1144,7 @@ test("automatic interaction resolves an item on every run and supports empty han
         kind: "interact_block",
         position: { x: 2, y: 65, z: 2 },
         face: "west",
-        aim: { x: 2, y: 65.25, z: 2.75 },
+        preserveView: true,
         selection: { mode: "item", slot: 0, emptyHand: true },
     });
 });
@@ -1189,7 +1189,7 @@ test("automatic empty-hand interaction activates a non-solid button without requ
         kind: "interact_block",
         position: { x: 2, y: 65, z: 2 },
         face: "west",
-        aim: { x: 2, y: 65.5, z: 2.5 },
+        preserveView: true,
         selection: { mode: "item", slot: 0, emptyHand: true },
     }]);
 });
@@ -1222,7 +1222,7 @@ test("automatic interaction activates a non-solid button while holding a placeab
         kind: "interact_block",
         position: { x: 2, y: 65, z: 2 },
         face: "west",
-        aim: { x: 2, y: 65.5, z: 2.5 },
+        preserveView: true,
         selection: { mode: "slot", slot: 4 },
     }]);
 });
@@ -1295,7 +1295,7 @@ test("automatic front chest placement directly places only while sneaking", () =
         kind: "interact_block",
         position: { x: 2, y: 65, z: 2 },
         face: "west",
-        aim: { x: 2, y: 65.25, z: 2.75 },
+        preserveView: true,
         selection: { mode: "slot", slot: 4 },
     }]);
 

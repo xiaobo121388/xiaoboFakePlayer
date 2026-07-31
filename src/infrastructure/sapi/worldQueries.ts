@@ -110,10 +110,8 @@ export class SapiWorldQueries implements WorldQueries {
         const fakePlayer = this.runtime.getHandle(fakePlayerId);
         if (fakePlayer === undefined) return [];
         return fakePlayer.dimension.getEntities({
-            excludeTypes: ["minecraft:player"],
             location: fakePlayer.location,
             maxDistance: query.maxDistance,
-            ...(query.typeId === undefined ? { families: ["mob"] } : {}),
         })
             .filter((entity) => entity.isValid
                 && entity.id !== fakePlayer.id

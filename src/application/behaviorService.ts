@@ -229,7 +229,7 @@ export class BehaviorService {
             return err("STALE_REVISION", `期望 revision ${expectedRecordRevision}，实际为 ${record.recordRevision}。`);
         }
         if (record.lifecycle.kind !== "online") {
-            return err("INVALID_STATE", `假人 ${id} 当前处于 ${record.lifecycle.kind}，不能查找生物。`);
+            return err("INVALID_STATE", `假人 ${id} 当前处于 ${record.lifecycle.kind}，不能查找实体。`);
         }
         const runtime = this.runtime.get(id);
         if (runtime === undefined || !runtime.alive) {
@@ -237,7 +237,7 @@ export class BehaviorService {
         }
         const normalizedTypeId = typeId?.trim();
         if (normalizedTypeId !== undefined && !validEntityTypeId(normalizedTypeId)) {
-            return err("INVALID_STATE", "生物 ID 必须是 namespace:path 格式的小写标识符。");
+            return err("INVALID_STATE", "实体 ID 必须是 namespace:path 格式的小写标识符。");
         }
         return ok(this.worldQueries.findInteractionTargets(id, {
             maxDistance: MAX_ENTITY_INTERACTION_DISTANCE,

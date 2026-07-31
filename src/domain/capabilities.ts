@@ -40,10 +40,10 @@ export const CAPABILITY_MATRIX: CapabilityMatrix = {
             detail: "空手与假人实体交互可直接打开该假人的设置界面。",
         },
         {
-            id: "nearby_mob_listing",
+            id: "nearby_entity_listing",
             availability: "enabled",
             verification: "bedrock_26_33_required",
-            detail: "即时动作可枚举假人周围 10 格内的生物；不可用时回退为按实体类型 ID 查找最近目标。",
+            detail: "即时动作可枚举假人周围 10 格内除自身外的所有实体；不可用时回退为按实体类型 ID 查找最近目标。",
         },
         {
             id: "structure_inventory_snapshot",

@@ -48,12 +48,6 @@ export class InventoryService {
         }
         return ok(undefined);
     }
-    getPlayerMainhandItemTypeId(actor) {
-        const authorization = this.authorize(actor);
-        return authorization.ok
-            ? this.access.getPlayerMainhandItemTypeId(actor.playerId)
-            : authorization;
-    }
     getOverview(actor, id, expectedRecordRevision) {
         const authorization = this.authorize(actor);
         if (!authorization.ok)

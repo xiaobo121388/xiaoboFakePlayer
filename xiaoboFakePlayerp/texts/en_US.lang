@@ -76,7 +76,6 @@ xiaobo.fp.form.behavior.place.by_slot=Use a Specific Hotbar Slot
 xiaobo.fp.form.behavior.place.by_item=Use a Specific Item
 xiaobo.fp.form.behavior.place.slot=Hotbar Slot (0-8)
 xiaobo.fp.form.behavior.place.item=Item ID (empty means empty-hand interaction)
-xiaobo.fp.form.behavior.place.use_mainhand=Use Player's Current Mainhand This Time (ignores Item ID)
 xiaobo.fp.form.behavior.use.slot=Inventory Slot (0-35)
 xiaobo.fp.form.behavior.projectile_claim.detail=Every 5 seconds, finds nearby arrows and thrown tridents and assigns this fake player as their thrower. It does not create or launch projectiles.
 xiaobo.fp.form.behavior.projectile_claim.radius=Search Radius (1-128 blocks)

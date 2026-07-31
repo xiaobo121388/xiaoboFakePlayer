@@ -181,7 +181,6 @@ export interface InventoryAccess {
         structureId: string,
         playerId: string,
     ): Result<readonly InventorySlotOverview[]>;
-    getPlayerMainhandItemTypeId(playerId: string): Result<string | null>;
     prepareTransfer(transfer: InventoryTransfer): Result<void>;
     compareWithImages(transfer: InventoryTransfer): Result<InventoryImageState>;
     compareFakeWithImages(transfer: InventoryTransfer): Result<InventoryImageState>;

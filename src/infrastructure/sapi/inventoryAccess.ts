@@ -1,7 +1,5 @@
 import {
-    EntityComponentTypes,
     world,
-    type EntityInventoryComponent,
     type ItemStack,
     type Player,
 } from "@minecraft/server";
@@ -53,16 +51,6 @@ export class SapiInventoryAccess implements InventoryAccess {
             player.value.location,
         );
         return image.ok ? ok(toOverview(image.value)) : image;
-    }
-
-    public getPlayerMainhandItemTypeId(playerId: string): Result<string | null> {
-        const player = this.findPlayer(playerId);
-        if (!player.ok) return player;
-        const inventory = player.value.getComponent(
-            EntityComponentTypes.Inventory,
-        ) as EntityInventoryComponent | undefined;
-        if (inventory === undefined) return err("INVALID_STATE", `玩家 ${playerId} 缺少库存组件。`);
-        return ok(inventory.container.getItem(player.value.selectedSlotIndex)?.typeId ?? null);
     }
 
     public prepareTransfer(transfer: InventoryTransfer): Result<void> {

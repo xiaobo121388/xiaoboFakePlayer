@@ -1,4 +1,4 @@
-import { EntityComponentTypes, world, } from "@minecraft/server";
+import { world, } from "@minecraft/server";
 import { TOTAL_SLOT_COUNT } from "../../domain/inventory.js";
 import { err, ok } from "../../domain/results.js";
 import { imagesEqual, itemStacksEqual, readPlayerImage, writePlayerImage, } from "./structureInventorySnapshotStore.js";
@@ -24,15 +24,6 @@ export class SapiInventoryAccess {
             return player;
         const image = this.snapshots.loadImage(structureId, player.value.dimension, player.value.location);
         return image.ok ? ok(toOverview(image.value)) : image;
-    }
-    getPlayerMainhandItemTypeId(playerId) {
-        const player = this.findPlayer(playerId);
-        if (!player.ok)
-            return player;
-        const inventory = player.value.getComponent(EntityComponentTypes.Inventory);
-        if (inventory === undefined)
-            return err("INVALID_STATE", `玩家 ${playerId} 缺少库存组件。`);
-        return ok(inventory.container.getItem(player.value.selectedSlotIndex)?.typeId ?? null);
     }
     prepareTransfer(transfer) {
         const player = this.findPlayer(transfer.playerId);

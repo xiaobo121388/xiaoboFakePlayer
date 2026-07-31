@@ -310,11 +310,10 @@ async function openPlaceSettingsForm(
         form.textField(t("xiaobo.fp.form.behavior.place.item"), "minecraft:oak_planks", {
             defaultValue: config.itemTypeId ?? "",
         });
-        form.toggle(t("xiaobo.fp.form.behavior.place.use_mainhand"), { defaultValue: false });
     }
     const response = await form.submitButton(t("xiaobo.fp.form.behavior.save")).show(player);
     if (response.canceled || response.formValues === undefined || !ready(player, services)) return;
-    const [enabled, intervalTicks, modeIndex, x, y, z, selection, usePlayerMainhand] = response.formValues;
+    const [enabled, intervalTicks, modeIndex, x, y, z, selection] = response.formValues;
     const mode = typeof modeIndex === "number" ? PLACE_MODES[modeIndex] : undefined;
     if (typeof enabled !== "boolean" || mode === undefined || typeof x !== "string"
         || typeof y !== "string" || typeof z !== "string") {
@@ -330,16 +329,8 @@ async function openPlaceSettingsForm(
         if (typeof selection !== "number") return sendError(player, "自动交互（放置）表单数据无效。");
         slot = selection;
     } else {
-        if (typeof selection !== "string" || typeof usePlayerMainhand !== "boolean") {
-            return sendError(player, "自动交互（放置）表单数据无效。");
-        }
-        if (usePlayerMainhand) {
-            const mainhandItemTypeId = services.inventory.getPlayerMainhandItemTypeId(actorIdentity(player));
-            if (!mainhandItemTypeId.ok) return sendError(player, mainhandItemTypeId.error.message);
-            itemTypeId = mainhandItemTypeId.value;
-        } else {
-            itemTypeId = withMinecraftNamespace(selection) || null;
-        }
+        if (typeof selection !== "string") return sendError(player, "自动交互（放置）表单数据无效。");
+        itemTypeId = withMinecraftNamespace(selection) || null;
     }
     await saveBehavior(player, services, record, {
         ...record.behavior,

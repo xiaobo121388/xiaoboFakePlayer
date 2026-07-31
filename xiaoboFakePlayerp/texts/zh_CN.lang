@@ -76,7 +76,6 @@ xiaobo.fp.form.behavior.place.by_slot=指定快捷栏
 xiaobo.fp.form.behavior.place.by_item=指定物品
 xiaobo.fp.form.behavior.place.slot=快捷栏槽位（0–8）
 xiaobo.fp.form.behavior.place.item=物品 ID（留空表示空手交互）
-xiaobo.fp.form.behavior.place.use_mainhand=本次使用玩家当前主手物品（忽略物品 ID）
 xiaobo.fp.form.behavior.use.slot=库存槽位（0–35）
 xiaobo.fp.form.behavior.projectile_claim.detail=每 5 秒搜索假人附近的箭和已投掷三叉戟，并将它们的投掷者改为该假人。不会生成或发射新的投射物。
 xiaobo.fp.form.behavior.projectile_claim.radius=搜索半径（1–128 格）

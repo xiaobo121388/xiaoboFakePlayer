@@ -108,7 +108,6 @@ class MemoryInventoryAccess implements InventoryAccess {
     public applyFakeAfterCount = 0;
     public experienceWriteCount = 0;
     public fakeExperienceWriteCount = 0;
-    public playerMainhandItemTypeId: string | null = "minecraft:oak_log";
 
     public constructor(private readonly snapshots: MemorySnapshots) {}
 
@@ -144,10 +143,6 @@ class MemoryInventoryAccess implements InventoryAccess {
     }[]> {
         this.liveOverviewReadCount += 1;
         return ok(Array.from({ length: 41 }, (_, slot) => ({ slot, item: null })));
-    }
-
-    public getPlayerMainhandItemTypeId(): Result<string | null> {
-        return ok(this.playerMainhandItemTypeId);
     }
 
     public prepareTransfer(transfer: InventoryTransfer): Result<void> {
@@ -356,30 +351,6 @@ test("inventory overview reads the authoritative offline snapshot after revision
     assert.equal(result.value.slots.length, 41);
     assert.equal(result.value.slots[0]?.item?.typeId, "minecraft:diamond_pickaxe");
     assert.equal(fixture.access.overviewReadCount, 1);
-});
-
-test("mainhand item lookup is authorized and preserves empty hand", () => {
-    const fixture = createFixture();
-
-    assert.deepEqual(fixture.service.getPlayerMainhandItemTypeId({
-        playerId: "member",
-        isOperator: false,
-    }), {
-        ok: false,
-        error: {
-            code: "PERMISSION_DENIED",
-            message: "你没有管理假人背包或经验的权限。",
-        },
-    });
-    assert.deepEqual(fixture.service.getPlayerMainhandItemTypeId({
-        playerId: "owner",
-        isOperator: true,
-    }), ok("minecraft:oak_log"));
-    fixture.access.playerMainhandItemTypeId = null;
-    assert.deepEqual(fixture.service.getPlayerMainhandItemTypeId({
-        playerId: "owner",
-        isOperator: true,
-    }), ok(null));
 });
 
 test("inventory overview rejects a stale record before reading an inventory", () => {

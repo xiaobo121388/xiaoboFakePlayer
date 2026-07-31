@@ -102,13 +102,6 @@ export class InventoryService {
         return ok(undefined);
     }
 
-    public getPlayerMainhandItemTypeId(actor: ActorIdentity): Result<string | null> {
-        const authorization = this.authorize(actor);
-        return authorization.ok
-            ? this.access.getPlayerMainhandItemTypeId(actor.playerId)
-            : authorization;
-    }
-
     public getOverview(
         actor: ActorIdentity,
         id: FakePlayerId,

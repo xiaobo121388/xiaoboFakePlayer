@@ -173,10 +173,6 @@ class MemoryInventoryAccess implements InventoryAccess {
         return ok([]);
     }
 
-    public getPlayerMainhandItemTypeId() {
-        return ok(null);
-    }
-
     public readonly states = new Map<string, InventoryImageState>();
     public readonly playerExperience = new Map<string, number>();
 

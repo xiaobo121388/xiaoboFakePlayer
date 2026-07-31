@@ -24,7 +24,7 @@ flowchart LR
 |---|---|
 | `LifecycleService` | 创建、上下线、重命名、删除、复活及稳定 record revision |
 | `InventoryService` | 在线活体/离线快照概览、检查点、41 槽物品/经验事务和 pending 恢复 |
-| `BehaviorService` | 即时动作、自动行为配置、寻路优先级仲裁、公平调度和全局方块读取预算 |
+| `BehaviorService` | 即时动作、自动行为配置、投射物归属扫描、寻路优先级仲裁、公平调度和全局方块读取预算 |
 
 三个服务共享 `OperationCoordinator`。写用例按排序后的 `fake:<id>` 和 `player:<playfabId>` 获取 lease；表单等待期间不持有 lease，提交时重新鉴权并检查 record revision。
 
@@ -36,6 +36,7 @@ flowchart LR
 | `InventorySnapshotStore` | 完整 41 槽结构快照及临时工作区恢复 |
 | `InventoryAccess` | 真人与在线假人的槽位、经验、before/after 比较和纯 DTO 概览 |
 | `FakePlayerRuntime` | 生成、皮肤、重绑定、断开、复活和真实动作 |
+| `BehaviorRuntime` | 扩展假人运行时，认领附近箭和投掷三叉戟的公开 projectile owner |
 | `WorldQueries` | 区块、方块、距离、视线、玩家和实体查询 |
 
 application 端口只接收稳定 ID、自有坐标、结构 ID、逻辑槽位和判别联合。`Player`、`SimulatedPlayer`、`ItemStack` 等引擎类型只存在于 SAPI infrastructure。
@@ -52,7 +53,7 @@ application 端口只接收稳定 ID、自有坐标、结构 ID、逻辑槽位�
 6. active 缺失或损坏时才恢复到最高有效 bank，并报告诊断。
 7. 部分键存在但两个 bank 都损坏时进入只读隔离，不能用空默认值覆盖世界数据。
 
-当前 schema：catalog 4、permissions 1、operations 2。catalog schema 1/2 在内存迁移，旧记录获得默认行为配置和默认皮肤；既有 schema 3 记录缺少新增的 `place` 行为子配置时，会补为默认关闭状态，只有旧版 `slot` 字段时则迁移为指定槽位模式。schema 1-3 的库存记录会把相邻上一 revision 迁移为强退恢复候选，schema 4 则显式保存并严格校验安全回退 revision。攻击、挖掘、自动交互（放置）和定时使用是互斥动作行为；历史记录若同时启用多项，加载时按攻击、挖掘、自动交互（放置）、定时使用的顺序只保留第一项，再通过正常提交路径持久化。
+当前 schema：catalog 5、permissions 1、operations 2。catalog schema 1/2 在内存迁移，旧记录获得默认行为配置和默认皮肤；既有 schema 3 记录缺少新增的 `place` 行为子配置时，会补为默认关闭状态，只有旧版 `slot` 字段时则迁移为指定槽位模式。schema 1-3 的库存记录会把相邻上一 revision 迁移为强退恢复候选，schema 4 则显式保存并严格校验安全回退 revision，schema 5 要求持久饱和设置。所有既有 schema 的行为配置若缺少 `projectileClaim`，都会迁移为关闭且半径 20 格。攻击、挖掘、自动交互（放置）和定时使用是互斥动作行为；历史记录若同时启用多项，加载时按攻击、挖掘、自动交互（放置）、定时使用的顺序只保留第一项，再通过正常提交路径持久化。三叉戟、箭挂机独立运行，每 100 tick 只查询箭和投掷三叉戟，不占用假人动作配额。
 
 ## 生命周期
 

@@ -19,6 +19,7 @@ export async function openBehaviorForm(player, services, record, openDetail) {
         addBehaviorButton(form, actions, "mine", record.behavior.mine.enabled, () => openMineForm(player, services, record, openDetail));
         addBehaviorButton(form, actions, "place", record.behavior.place.enabled, () => openPlaceForm(player, services, record, openDetail));
         addBehaviorButton(form, actions, "use", record.behavior.use.enabled, () => openUseForm(player, services, record, openDetail));
+        addBehaviorButton(form, actions, "projectileClaim", record.behavior.projectileClaim.enabled, () => openProjectileClaimForm(player, services, record, openDetail));
         form.button(t("xiaobo.fp.form.back"));
         actions.push(() => openDetail(record));
         const response = await form.show(player);
@@ -162,6 +163,29 @@ async function openUseForm(player, services, record, openDetail) {
         use: { enabled, intervalTicks: Number(intervalTicks), slot },
     }, openDetail);
 }
+async function openProjectileClaimForm(player, services, record, openDetail) {
+    const config = record.behavior.projectileClaim;
+    const response = await new ModalFormData()
+        .title(t("xiaobo.fp.form.behavior.projectile_claim"))
+        .toggle(t("xiaobo.fp.form.behavior.enabled"), { defaultValue: config.enabled })
+        .label(t("xiaobo.fp.form.behavior.projectile_claim.detail"))
+        .textField(t("xiaobo.fp.form.behavior.projectile_claim.radius"), "20", {
+        defaultValue: String(config.radius),
+    })
+        .submitButton(t("xiaobo.fp.form.behavior.save"))
+        .show(player);
+    if (response.canceled || response.formValues === undefined || !ready(player, services))
+        return;
+    const enabled = response.formValues.find((value) => typeof value === "boolean");
+    const radius = response.formValues[response.formValues.length - 1];
+    if (typeof enabled !== "boolean" || typeof radius !== "string") {
+        return sendError(player, "三叉戟、箭挂机表单数据无效。");
+    }
+    await saveBehavior(player, services, record, {
+        ...record.behavior,
+        projectileClaim: { enabled, radius: Number(radius) },
+    }, openDetail);
+}
 async function openPlaceForm(player, services, record, openDetail) {
     const config = record.behavior.place;
     const currentSource = config.selectionMode === "slot"
@@ -274,9 +298,10 @@ async function saveBehavior(player, services, record, config, openDetail) {
     await openDetail(result.value);
 }
 function addBehaviorButton(form, actions, kind, enabled, action) {
+    const translationKey = kind === "projectileClaim" ? "projectile_claim" : kind;
     form.button({
         rawtext: [
-            t(`xiaobo.fp.form.behavior.${kind}`),
+            t(`xiaobo.fp.form.behavior.${translationKey}`),
             { text: `\n${enabled ? "§a" : "§7"}` },
             t(enabled ? "xiaobo.fp.form.behavior.on" : "xiaobo.fp.form.behavior.off"),
             { text: "§r" },

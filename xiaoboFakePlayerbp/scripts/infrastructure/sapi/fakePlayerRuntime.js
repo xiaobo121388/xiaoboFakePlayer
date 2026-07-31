@@ -5,6 +5,7 @@ const TAG_PREFIX = "xiaobo_fp_";
 const MAX_EXPERIENCE_CHANGE = 16_777_216;
 const SATURATION_EFFECT = "minecraft:saturation";
 const SATURATION_DURATION_TICKS = 120;
+const CLAIMABLE_PROJECTILE_TYPE_IDS = new Set(["minecraft:arrow", "minecraft:thrown_trident"]);
 export class SapiFakePlayerRuntime {
     handles = new Map();
     capturePlayerSkin(playerId) {
@@ -74,6 +75,31 @@ export class SapiFakePlayerRuntime {
             });
         }
         return true;
+    }
+    claimProjectiles(id, radius) {
+        if (!Number.isFinite(radius) || radius <= 0) {
+            throw new RangeError(`claim projectiles ${id}: 搜索半径必须是正数。`);
+        }
+        const player = this.getHandle(id);
+        if (player === undefined)
+            return 0;
+        let claimed = 0;
+        for (const type of CLAIMABLE_PROJECTILE_TYPE_IDS) {
+            for (const entity of player.dimension.getEntities({
+                location: player.location,
+                maxDistance: radius,
+                type,
+            })) {
+                if (!entity.isValid)
+                    continue;
+                const projectile = entity.getComponent(EntityComponentTypes.Projectile);
+                if (projectile === undefined || projectile.owner === player)
+                    continue;
+                projectile.owner = player;
+                claimed += 1;
+            }
+        }
+        return claimed;
     }
     resolveInventorySlot(id, selection) {
         const player = this.getHandle(id);

@@ -1,5 +1,5 @@
 import { HOTBAR_SLOT_COUNT, INVENTORY_SLOT_COUNT } from "../domain/inventory.js";
-import { decodeBehaviorConfig, EXCLUSIVE_ACTION_BEHAVIORS, normalizeExclusiveActionBehaviors, } from "../domain/behavior.js";
+import { decodeBehaviorConfig, EXCLUSIVE_ACTION_BEHAVIORS, normalizeExclusiveActionBehaviors, PROJECTILE_CLAIM_INTERVAL_TICKS, } from "../domain/behavior.js";
 import { isAllowed } from "../domain/permissions.js";
 import { err, ok } from "../domain/results.js";
 const MAX_INTERACTION_DISTANCE = 6;
@@ -37,6 +37,7 @@ export class BehaviorService {
     coordinator;
     inventory;
     nextDueTicks = new Map();
+    nextProjectileClaimTicks = new Map();
     following = new Set();
     mineScans = new Map();
     mineTargets = new Map();
@@ -217,12 +218,14 @@ export class BehaviorService {
             && this.runtime.get(record.id)?.alive === true))
             .sort((left, right) => left.id.localeCompare(right.id));
         const activeIds = new Set(records.map((record) => record.id));
+        this.removeInactiveProjectileClaimState(records);
         for (const id of this.oneShotNavigations.keys()) {
             if (!activeIds.has(id))
                 this.oneShotNavigations.delete(id);
         }
         for (const record of records)
             this.refreshOneShotNavigation(record.id);
+        this.runProjectileClaimScans(records, pendingIds, currentTick);
         const tasks = records
             .filter((record) => !pendingIds.has(record.id))
             .flatMap((record) => AUTOMATIC_BEHAVIORS
@@ -296,6 +299,24 @@ export class BehaviorService {
             case "mine": return this.runMine(record, blockBudget);
             case "place": return this.runPlace(record, blockBudget);
             case "use": return this.runUse(record);
+        }
+    }
+    runProjectileClaimScans(records, pendingIds, currentTick) {
+        for (const record of records) {
+            if (!record.behavior.projectileClaim.enabled
+                || pendingIds.has(record.id)
+                || (this.nextProjectileClaimTicks.get(record.id) ?? 0) > currentTick)
+                continue;
+            const lease = this.coordinator.tryAcquire([`fake:${record.id}`]);
+            if (!lease.ok)
+                continue;
+            try {
+                this.runtime.claimProjectiles(record.id, record.behavior.projectileClaim.radius);
+                this.nextProjectileClaimTicks.set(record.id, currentTick + PROJECTILE_CLAIM_INTERVAL_TICKS);
+            }
+            finally {
+                lease.value.release();
+            }
         }
     }
     canUseAutomaticNavigation(record, source) {
@@ -819,6 +840,16 @@ export class BehaviorService {
         this.mineTargets.delete(id);
         this.activeMineTargets.delete(id);
         this.oneShotNavigations.delete(id);
+        this.nextProjectileClaimTicks.delete(id);
+    }
+    removeInactiveProjectileClaimState(records) {
+        const activeIds = new Set(records
+            .filter((record) => record.behavior.projectileClaim.enabled)
+            .map((record) => record.id));
+        for (const id of this.nextProjectileClaimTicks.keys()) {
+            if (!activeIds.has(id))
+                this.nextProjectileClaimTicks.delete(id);
+        }
     }
     removeInactiveRuntimeState(tasks) {
         const activeKeys = new Set(tasks.map((task) => task.key));

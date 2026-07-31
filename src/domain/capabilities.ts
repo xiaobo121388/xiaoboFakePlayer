@@ -34,6 +34,12 @@ export const CAPABILITY_MATRIX: CapabilityMatrix = {
             detail: "模拟玩家可按视线命中点或指定坐标，通过原生建造和通用交互动作放置方块、激活按钮等方块。",
         },
         {
+            id: "automatic_projectile_claim",
+            availability: "enabled",
+            verification: "bedrock_26_33_required",
+            detail: "模拟玩家可每 5 秒认领指定半径内的箭和投掷三叉戟为自己的投射物。",
+        },
+        {
             id: "entity_interaction_form",
             availability: "enabled",
             verification: "bedrock_26_33_required",

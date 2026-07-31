@@ -10,6 +10,7 @@ test("capability matrix is versioned, unique, and keeps unverified controls hidd
     assert.equal(isCapabilityEnabled("persona_skin_copy"), true);
     assert.equal(isCapabilityEnabled("entity_interaction_form"), true);
     assert.equal(isCapabilityEnabled("nearby_mob_listing"), true);
+    assert.equal(isCapabilityEnabled("automatic_projectile_claim"), true);
     assert.equal(isCapabilityEnabled("sneaking"), true);
     assert.equal(isCapabilityEnabled("hunger_saturation_write"), false);
     assert.equal(isCapabilityEnabled("persistent_saturation_effect"), true);

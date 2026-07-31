@@ -142,6 +142,7 @@ export interface FakePlayerRecord {
     readonly expectedOnline: boolean;
     readonly location: SavedLocation;
     readonly gameMode: FakePlayerGameMode;
+    readonly keepSaturated: boolean;
     readonly skin: FakePlayerSkin;
     readonly selectedSlot: number;
     readonly totalExperience: number;

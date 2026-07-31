@@ -76,6 +76,12 @@ export const CAPABILITY_MATRIX: CapabilityMatrix = {
             detail: "公开组件存在，但写入语义尚未通过正式版 1.26.33 实机验证。",
         },
         {
+            id: "persistent_saturation_effect",
+            availability: "enabled",
+            verification: "bedrock_26_33_required",
+            detail: "通过公开状态效果 API 每 5 秒续加饱和效果，并在关闭时立即移除。",
+        },
+        {
             id: "automatic_fishing",
             availability: "hidden_pending_game_validation",
             verification: "bedrock_26_33_required",

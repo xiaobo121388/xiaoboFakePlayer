@@ -142,6 +142,17 @@ system.runInterval(() => {
 system.runInterval(() => {
 	if (startupStatus.state !== "ready") return;
 	try {
+		const result = lifecycle.refreshSaturation();
+		if (!result.ok) console.error(`[xiaobo-fake-player] saturation refresh failed: ${result.error.message}`);
+	} catch (cause) {
+		const message = cause instanceof Error ? cause.message : String(cause);
+		console.error(`[xiaobo-fake-player] saturation refresh crashed: ${message}`);
+	}
+}, 100);
+
+system.runInterval(() => {
+	if (startupStatus.state !== "ready") return;
+	try {
 		const result = behavior.tick(system.currentTick);
 		if (!result.ok) console.error(`[xiaobo-fake-player] behavior tick failed: ${result.error.message}`);
 		else {

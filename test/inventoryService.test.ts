@@ -164,6 +164,7 @@ function createFixture() {
             rotation: { x: 0, y: 0 },
         },
         gameMode: "survival" as const,
+        keepSaturated: false,
         skin: { kind: "default" as const },
         selectedSlot: 0,
         totalExperience: 0,

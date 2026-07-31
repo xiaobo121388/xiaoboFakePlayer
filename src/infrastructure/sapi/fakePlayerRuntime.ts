@@ -33,6 +33,8 @@ import type { FakePlayerGameMode, FakePlayerId, FakePlayerSkin, Point, SavedLoca
 
 const TAG_PREFIX = "xiaobo_fp_";
 const MAX_EXPERIENCE_CHANGE = 16_777_216;
+const SATURATION_EFFECT = "minecraft:saturation";
+const SATURATION_DURATION_TICKS = 120;
 
 export class SapiFakePlayerRuntime implements FakePlayerRuntime {
     private readonly handles = new Map<FakePlayerId, SimulatedPlayer>();
@@ -66,6 +68,12 @@ export class SapiFakePlayerRuntime implements FakePlayerRuntime {
             player.setRotation(request.rotation);
             player.selectedSlotIndex = request.selectedSlot;
             addExperience(player, request.totalExperience);
+            if (request.keepSaturated) {
+                player.addEffect(SATURATION_EFFECT, SATURATION_DURATION_TICKS, {
+                    amplifier: 5,
+                    showParticles: false,
+                });
+            }
         } catch (cause) {
             if (player.isValid) player.disconnect();
             const message = cause instanceof Error ? cause.message : String(cause);
@@ -255,8 +263,21 @@ export class SapiFakePlayerRuntime implements FakePlayerRuntime {
             case "rotate":
                 player.rotateBody(action.angle);
                 return { accepted: true };
+            case "set_game_mode":
+                player.setGameMode(toGameMode(action.gameMode));
+                return { accepted: true };
             case "set_rotation":
                 player.setBodyRotation(action.angle);
+                return { accepted: true };
+            case "set_saturation":
+                if (action.enabled) {
+                    player.addEffect(SATURATION_EFFECT, SATURATION_DURATION_TICKS, {
+                        amplifier: 5,
+                        showParticles: false,
+                    });
+                } else {
+                    player.removeEffect(SATURATION_EFFECT);
+                }
                 return { accepted: true };
             case "set_sneaking":
                 player.stopInteracting();

@@ -129,8 +129,8 @@ async function openDetailForm(player, services, record) {
             actions.push(() => openBehaviorForm(player, services, record, (updated) => openDetailForm(player, services, updated)));
             form.button(t("xiaobo.fp.form.detail.rename"));
             actions.push(() => openRenameForm(player, services, record));
-            form.button(t("xiaobo.fp.form.detail.respawn"));
-            actions.push(() => openRespawnRuleForm(player, services, record));
+            form.button(t("xiaobo.fp.form.detail.other_settings"));
+            actions.push(() => openOtherSettingsForm(player, services, record));
             form.button(t("xiaobo.fp.form.detail.inventory"));
             actions.push(() => openInventoryForm(player, services, record, (updated) => openDetailForm(player, services, updated)));
         }
@@ -280,21 +280,34 @@ async function openRenameForm(player, services, record) {
         return sendError(player, "新名称无效。");
     await runRecordMutation(player, services, record.id, (current) => services.lifecycle.rename(actorIdentity(player), current.id, current.recordRevision, { requestedName: name, unavailablePlayerNames: world.getAllPlayers().map((candidate) => candidate.name) }));
 }
-async function openRespawnRuleForm(player, services, record) {
+async function openOtherSettingsForm(player, services, record) {
     const response = await new ModalFormData()
-        .title(t("xiaobo.fp.form.respawn.title"))
-        .dropdown(t("xiaobo.fp.form.respawn.mode"), RESPAWN_MODES.map((mode) => t(`xiaobo.fp.respawn.${mode}`)), {
+        .title(t("xiaobo.fp.form.other_settings.title"))
+        .dropdown(t("xiaobo.fp.form.other_settings.game_mode"), GAME_MODES.map((mode) => t(`xiaobo.fp.gamemode.${mode}`)), {
+        defaultValueIndex: Math.max(0, GAME_MODES.indexOf(record.gameMode)),
+    })
+        .dropdown(t("xiaobo.fp.form.other_settings.respawn_mode"), RESPAWN_MODES.map((mode) => t(`xiaobo.fp.respawn.${mode}`)), {
         defaultValueIndex: Math.max(0, RESPAWN_MODES.indexOf(record.respawnMode)),
     })
-        .submitButton(t("xiaobo.fp.form.respawn.submit"))
+        .toggle(t("xiaobo.fp.form.other_settings.keep_saturated"), { defaultValue: record.keepSaturated })
+        .submitButton(t("xiaobo.fp.form.other_settings.submit"))
         .show(player);
     if (response.canceled || !ready(player, services))
         return;
-    const index = response.formValues?.[0];
-    const mode = typeof index === "number" ? RESPAWN_MODES[index] : undefined;
-    if (mode === undefined)
-        return sendError(player, "复活规则无效。");
-    await runRecordMutation(player, services, record.id, (current) => services.lifecycle.setRespawnRule(actorIdentity(player), current.id, current.recordRevision, mode, mode === "manual" ? playerLocation(player) : undefined));
+    const gameModeIndex = response.formValues?.[0];
+    const respawnModeIndex = response.formValues?.[1];
+    const keepSaturated = response.formValues?.[2];
+    const gameMode = typeof gameModeIndex === "number" ? GAME_MODES[gameModeIndex] : undefined;
+    const respawnMode = typeof respawnModeIndex === "number" ? RESPAWN_MODES[respawnModeIndex] : undefined;
+    if (gameMode === undefined || respawnMode === undefined || typeof keepSaturated !== "boolean") {
+        return sendError(player, "其他功能表单数据无效。");
+    }
+    await runRecordMutation(player, services, record.id, (current) => services.lifecycle.setOtherSettings(actorIdentity(player), current.id, current.recordRevision, {
+        gameMode,
+        keepSaturated,
+        respawnMode,
+        manualRespawnLocation: respawnMode === "manual" ? playerLocation(player) : undefined,
+    }));
 }
 async function confirmPurge(player, services, record) {
     const response = await new MessageFormData()

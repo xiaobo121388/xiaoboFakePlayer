@@ -461,6 +461,10 @@ export class RecoveryRunner {
         if (runtimeState === undefined || !runtimeState.alive) {
             return err("INVALID_STATE", `${record.id} 复活后仍没有存活实例。`);
         }
+        if (currentRecord.keepSaturated
+            && !this.runtime.perform(record.id, { kind: "set_saturation", enabled: true }).accepted) {
+            return err("CONFLICT", `无法为恢复复活后的假人 ${record.id} 启用持续饱和。`);
+        }
         const online = transitionLifecycle(currentRecord, currentRecord.recordRevision, { kind: "online" });
         if (!online.ok)
             return online;
@@ -525,6 +529,7 @@ function spawnRequest(record) {
         position: record.location.position,
         rotation: record.location.rotation,
         gameMode: record.gameMode,
+        keepSaturated: record.keepSaturated,
         skin: record.skin,
         selectedSlot: record.selectedSlot,
         totalExperience: record.totalExperience,

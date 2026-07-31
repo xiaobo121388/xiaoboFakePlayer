@@ -19,6 +19,7 @@ function record(kind: "online" | "offline", revision = 2): FakePlayerRecord {
             rotation: { x: 0, y: 0 },
         },
         gameMode: "survival",
+        keepSaturated: false,
         skin: { kind: "default" },
         selectedSlot: 0,
         totalExperience: 0,

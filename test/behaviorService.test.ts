@@ -434,14 +434,14 @@ test("entity interactions reject out-of-range or obstructed transient targets", 
     }).ok, false);
 });
 
-test("interaction target lookup lists nearby mobs and supports an exact type filter", () => {
+test("interaction target lookup lists nearby entities and supports an exact type filter", () => {
     const fixture = createFixture();
     const operator = { playerId: "operator", isOperator: true };
     const member = { playerId: "member", isOperator: false };
     fixture.queries.interactionTargets = [{
-        id: "cow-1",
-        typeId: "minecraft:cow",
-        nameTag: "Bessie",
+        id: "item-1",
+        typeId: "minecraft:item",
+        nameTag: "",
         dimension: "minecraft:overworld",
         position: { x: 6, y: 64, z: 8 },
     }];
@@ -449,9 +449,9 @@ test("interaction target lookup lists nearby mobs and supports an exact type fil
     assert.deepEqual(fixture.service.listInteractionTargets(operator, fixture.record.id, 4), {
         ok: true,
         value: [{
-            id: "cow-1",
-            typeId: "minecraft:cow",
-            nameTag: "Bessie",
+            id: "item-1",
+            typeId: "minecraft:item",
+            nameTag: "",
             distance: 10,
         }],
     });

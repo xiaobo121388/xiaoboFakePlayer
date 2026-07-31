@@ -141,6 +141,6 @@ Copyright (C) 2026 xiaobo
 本模组在设计与实现过程中参考了以下项目：
 
 - [ForestOfLight/Understudy](https://github.com/ForestOfLight/Understudy)，由 ForestOfLight 以 MIT License 发布。再分发其代码或实质性部分时必须保留其版权与 MIT 许可声明。
-- [xBoyMinemc/FlashFakePlayerPack](https://github.com/xBoyMinemc/FlashFakePlayerPack)。截至 2026-07-31，其仓库未提供可识别的开源许可证；致谢不等于获得复制或再分发其代码、资源的许可。若发行物包含其代码、资源或实质性改编，必须先取得相关版权方授权，否则不得发布。
+- [xBoyMinemc/FlashFakePlayerPack](https://github.com/xBoyMinemc/FlashFakePlayerPack)。
 
 完整的第三方版权与许可文本见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。本项目与 Mojang Studios 或 Microsoft 无隶属或背书关系。

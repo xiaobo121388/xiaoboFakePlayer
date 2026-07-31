@@ -195,6 +195,16 @@ export interface RuntimeEntityTarget {
     readonly position: Point;
 }
 
+export interface RuntimeEntityInteractionTarget extends RuntimeEntityTarget {
+    readonly typeId: string;
+    readonly nameTag: string;
+}
+
+export interface EntityInteractionTargetQuery {
+    readonly maxDistance: number;
+    readonly typeId?: string;
+}
+
 export interface AttackTargetQuery {
     readonly maxDistance: number;
     readonly families: readonly string[];
@@ -227,6 +237,10 @@ export interface WorldQueries {
     hasLineOfSight(fakePlayerId: FakePlayerId, targetId: string): boolean;
     distanceSquared(fakePlayerId: FakePlayerId, targetId: string): number | undefined;
     findOnlinePlayer(playerId: string): RuntimeEntityTarget | undefined;
+    findInteractionTargets(
+        fakePlayerId: FakePlayerId,
+        query: EntityInteractionTargetQuery,
+    ): readonly RuntimeEntityInteractionTarget[];
     findAttackTargets(fakePlayerId: FakePlayerId, query: AttackTargetQuery): readonly RuntimeEntityTarget[];
     getBlockInfo(dimension: DimensionKey, position: Point): RuntimeBlockInfo | undefined;
 }

@@ -3,7 +3,7 @@ import { decodeBehaviorConfig, EXCLUSIVE_ACTION_BEHAVIORS, normalizeExclusiveAct
 import { isAllowed } from "../domain/permissions.js";
 import { err, ok } from "../domain/results.js";
 const MAX_INTERACTION_DISTANCE = 6;
-const MAX_INTERACTION_DISTANCE_SQUARED = MAX_INTERACTION_DISTANCE * MAX_INTERACTION_DISTANCE;
+const MAX_ENTITY_INTERACTION_DISTANCE = 10;
 const MAX_AUTOMATIC_ACTIONS_PER_TICK = 8;
 const MAX_BLOCK_READS_PER_TICK = 256;
 const ATTACK_QUERY_LIMIT = 16;
@@ -93,6 +93,38 @@ export class BehaviorService {
         finally {
             lease.value.release();
         }
+    }
+    listInteractionTargets(actor, id, expectedRecordRevision, typeId) {
+        const permissions = this.stateStore.loadPermissions();
+        if (!permissions.ok)
+            return err("CONFLICT", permissions.diagnostics.join("; "));
+        if (!isAllowed(actor, permissions.state.value, "manage")) {
+            return err("PERMISSION_DENIED", "你没有管理假人的权限。");
+        }
+        const catalog = this.stateStore.loadCatalog();
+        if (!catalog.ok)
+            return err("CONFLICT", catalog.diagnostics.join("; "));
+        const record = catalog.state.value.records[id];
+        if (record === undefined)
+            return err("NOT_FOUND", `未找到假人 ${id}。`);
+        if (record.recordRevision !== expectedRecordRevision) {
+            return err("STALE_REVISION", `期望 revision ${expectedRecordRevision}，实际为 ${record.recordRevision}。`);
+        }
+        if (record.lifecycle.kind !== "online") {
+            return err("INVALID_STATE", `假人 ${id} 当前处于 ${record.lifecycle.kind}，不能查找生物。`);
+        }
+        const runtime = this.runtime.get(id);
+        if (runtime === undefined || !runtime.alive) {
+            return err("INVALID_STATE", `假人 ${id} 没有存活的在线实例。`);
+        }
+        const normalizedTypeId = typeId?.trim();
+        if (normalizedTypeId !== undefined && !validEntityTypeId(normalizedTypeId)) {
+            return err("INVALID_STATE", "生物 ID 必须是 namespace:path 格式的小写标识符。");
+        }
+        return ok(this.worldQueries.findInteractionTargets(id, {
+            maxDistance: MAX_ENTITY_INTERACTION_DISTANCE,
+            ...(normalizedTypeId === undefined ? {} : { typeId: normalizedTypeId }),
+        }).map((target) => toEntityInteractionTarget(runtime, target)));
     }
     updateBehaviorConfig(actor, id, expectedRecordRevision, expectedConfig, config) {
         const normalizedExpected = decodeBehaviorConfig(expectedConfig);
@@ -989,7 +1021,7 @@ function mapAction(fakePlayerId, action, runtime, worldQueries) {
             return speed.ok ? ok({ kind: "navigate", position: action.position, speed: speed.value }) : speed;
         }
         case "navigate_entity": {
-            const target = validateEntityTarget(fakePlayerId, action.targetId, worldQueries, false);
+            const target = validateEntityTarget(fakePlayerId, action.targetId, worldQueries, null);
             if (!target.ok)
                 return target;
             const speed = normalizeSpeed(action.speed);
@@ -1005,9 +1037,12 @@ function mapAction(fakePlayerId, action, runtime, worldQueries) {
                 return err("INVALID_STATE", "传送目标所在区块未加载。");
             }
             return ok(action);
-        case "attack_entity":
-        case "interact_entity": {
+        case "attack_entity": {
             const target = validateEntityTarget(fakePlayerId, action.targetId, worldQueries);
+            return target.ok ? ok(action) : target;
+        }
+        case "interact_entity": {
+            const target = validateEntityTarget(fakePlayerId, action.targetId, worldQueries, MAX_ENTITY_INTERACTION_DISTANCE);
             return target.ok ? ok(action) : target;
         }
         case "break_block": {
@@ -1060,19 +1095,30 @@ function validateCoordinateTarget(dimension, position, runtimeDimension, worldQu
         ? ok(undefined)
         : err("INVALID_STATE", "目标坐标所在区块未加载。");
 }
-function validateEntityTarget(fakePlayerId, targetId, worldQueries, requireReach = true) {
+function validateEntityTarget(fakePlayerId, targetId, worldQueries, maxDistance = MAX_INTERACTION_DISTANCE) {
     if (targetId.length === 0)
         return err("NOT_FOUND", "目标实体已失效。");
     const distanceSquared = worldQueries.distanceSquared(fakePlayerId, targetId);
     if (distanceSquared === undefined)
         return err("NOT_FOUND", "目标实体不存在或不在同一维度。");
-    if (requireReach && distanceSquared > MAX_INTERACTION_DISTANCE_SQUARED) {
-        return err("INVALID_STATE", `目标实体距离超过 ${MAX_INTERACTION_DISTANCE} 格。`);
+    if (maxDistance !== null && distanceSquared > maxDistance * maxDistance) {
+        return err("INVALID_STATE", `目标实体距离超过 ${maxDistance} 格。`);
     }
-    if (requireReach && !worldQueries.hasLineOfSight(fakePlayerId, targetId)) {
+    if (maxDistance !== null && !worldQueries.hasLineOfSight(fakePlayerId, targetId)) {
         return err("INVALID_STATE", "目标实体被方块遮挡。");
     }
     return ok(undefined);
+}
+function toEntityInteractionTarget(source, target) {
+    return {
+        id: target.id,
+        typeId: target.typeId,
+        nameTag: target.nameTag,
+        distance: Math.sqrt(distanceSquared(source.position, target.position)),
+    };
+}
+function validEntityTypeId(typeId) {
+    return /^[a-z0-9_.-]+:[a-z0-9_./-]+$/.test(typeId);
 }
 function validateBlockTarget(fakePlayerId, action, runtimeDimension, worldQueries, requireSolid = true) {
     const coordinate = validateCoordinateTarget(action.dimension, action.position, runtimeDimension, worldQueries);

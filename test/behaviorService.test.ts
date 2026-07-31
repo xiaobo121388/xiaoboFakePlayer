@@ -6,12 +6,14 @@ import { InventoryService, snapshotId } from "../src/application/inventoryServic
 import { OperationCoordinator } from "../src/application/operationCoordinator.js";
 import type {
     AttackTargetQuery,
+    EntityInteractionTargetQuery,
     FakePlayerRuntime,
     InventoryAccess,
     InventorySnapshotStore,
     RuntimeActionReceipt,
     RuntimeBlockHit,
     RuntimeBlockInfo,
+    RuntimeEntityInteractionTarget,
     RuntimeEntityTarget,
     RuntimeFakePlayer,
     RuntimeFakePlayerAction,
@@ -152,6 +154,8 @@ class MemoryWorldQueries implements WorldQueries {
     public viewBlockHit: RuntimeBlockHit | undefined;
     public readonly viewBlockMaxDistances: number[] = [];
     public readonly onlinePlayers = new Map<string, RuntimeEntityTarget>();
+    public interactionTargets: readonly RuntimeEntityInteractionTarget[] = [];
+    public readonly interactionQueries: EntityInteractionTargetQuery[] = [];
     public attackTargets: readonly RuntimeEntityTarget[] = [];
     public blockInfo: RuntimeBlockInfo | undefined;
     public readonly blockInfoByPosition = new Map<string, RuntimeBlockInfo>();
@@ -184,6 +188,14 @@ class MemoryWorldQueries implements WorldQueries {
 
     public findOnlinePlayer(playerId: string): RuntimeEntityTarget | undefined {
         return this.onlinePlayers.get(playerId);
+    }
+
+    public findInteractionTargets(
+        _fakePlayerId: FakePlayerId,
+        query: EntityInteractionTargetQuery,
+    ): readonly RuntimeEntityInteractionTarget[] {
+        this.interactionQueries.push(query);
+        return this.interactionTargets;
     }
 
     public findAttackTargets(_fakePlayerId: FakePlayerId, _query: AttackTargetQuery): readonly RuntimeEntityTarget[] {
@@ -408,6 +420,62 @@ test("entity interactions reject out-of-range or obstructed transient targets", 
     assert.equal(fixture.service.perform(operator, fixture.record.id, 4, action).ok, false);
     fixture.queries.visible = true;
     assert.equal(fixture.service.perform(operator, fixture.record.id, 4, action).ok, true);
+
+    fixture.queries.entityDistanceSquared = 81;
+    assert.equal(fixture.service.perform(operator, fixture.record.id, 4, {
+        kind: "interact_entity",
+        targetId: "entity-1",
+    }).ok, true);
+    fixture.queries.entityDistanceSquared = 101;
+    assert.equal(fixture.service.perform(operator, fixture.record.id, 4, {
+        kind: "interact_entity",
+        targetId: "entity-1",
+    }).ok, false);
+});
+
+test("interaction target lookup lists nearby mobs and supports an exact type filter", () => {
+    const fixture = createFixture();
+    const operator = { playerId: "operator", isOperator: true };
+    const member = { playerId: "member", isOperator: false };
+    fixture.queries.interactionTargets = [{
+        id: "cow-1",
+        typeId: "minecraft:cow",
+        nameTag: "Bessie",
+        dimension: "minecraft:overworld",
+        position: { x: 6, y: 64, z: 8 },
+    }];
+
+    assert.deepEqual(fixture.service.listInteractionTargets(operator, fixture.record.id, 4), {
+        ok: true,
+        value: [{
+            id: "cow-1",
+            typeId: "minecraft:cow",
+            nameTag: "Bessie",
+            distance: 10,
+        }],
+    });
+    assert.deepEqual(fixture.queries.interactionQueries, [{ maxDistance: 10 }]);
+
+    assert.equal(fixture.service.listInteractionTargets(member, fixture.record.id, 4).ok, false);
+    assert.equal(fixture.service.listInteractionTargets(operator, fixture.record.id, 3).ok, false);
+    assert.equal(fixture.queries.interactionQueries.length, 1);
+
+    assert.equal(fixture.service.listInteractionTargets(
+        operator,
+        fixture.record.id,
+        4,
+        "Cow",
+    ).ok, false);
+    assert.equal(fixture.service.listInteractionTargets(
+        operator,
+        fixture.record.id,
+        4,
+        "minecraft:cow",
+    ).ok, true);
+    assert.deepEqual(fixture.queries.interactionQueries.at(-1), {
+        maxDistance: 10,
+        typeId: "minecraft:cow",
+    });
 });
 
 test("item actions only accept real inventory slots", () => {

@@ -9,7 +9,7 @@ const ALLOWED_TRANSITIONS = {
     respawning: new Set(["online", "error"]),
     deleting: new Set(["offline", "error"]),
     missing: new Set(["restoring", "error"]),
-    error: new Set(["offline", "restoring"]),
+    error: new Set(["deleting", "offline", "restoring"]),
 };
 export function transitionLifecycle(record, expectedRevision, next) {
     if (record.recordRevision !== expectedRevision) {

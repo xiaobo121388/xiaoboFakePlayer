@@ -217,7 +217,7 @@ test("checkpoint commits the verified image while retaining the previous snapsho
     assert.equal(fixture.snapshots.has(snapshotId(fixture.record.id, 2)), true);
 });
 
-test("checkpoint rotation retains exactly the current and previous snapshots", () => {
+test("checkpoint rotation pins the first visible snapshot as the session recovery baseline", () => {
     const fixture = createFixture();
     const second = fixture.service.checkpoint(fixture.record.id, fixture.record.recordRevision, 40);
     assert.equal(second.ok, true);
@@ -232,11 +232,42 @@ test("checkpoint rotation retains exactly the current and previous snapshots", (
     assert.equal(third.ok, true);
     if (!third.ok) return;
     assert.equal(third.value.record.inventoryRevision, 3);
-    assert.equal(third.value.record.inventoryFallbackRevision, 2);
-    assert.equal(fixture.snapshots.has(snapshotId(fixture.record.id, 1)), false);
-    assert.equal(fixture.snapshots.has(snapshotId(fixture.record.id, 2)), true);
+    assert.equal(third.value.record.inventoryFallbackRevision, 1);
+    assert.equal(fixture.snapshots.has(snapshotId(fixture.record.id, 1)), true);
+    assert.equal(fixture.snapshots.has(snapshotId(fixture.record.id, 2)), false);
     assert.equal(fixture.snapshots.has(snapshotId(fixture.record.id, 3)), true);
-    assert.deepEqual(fixture.snapshots.removals, [snapshotId(fixture.record.id, 1)]);
+    assert.deepEqual(fixture.snapshots.removals, [snapshotId(fixture.record.id, 2)]);
+});
+
+test("a new session advances the recovery baseline only after the current snapshot survived restart", () => {
+    const fixture = createFixture();
+    const second = fixture.service.checkpoint(fixture.record.id, fixture.record.recordRevision, 40);
+    assert.equal(second.ok, true);
+    if (!second.ok) return;
+    const third = fixture.service.checkpoint(second.value.record.id, second.value.record.recordRevision, 60);
+    assert.equal(third.ok, true);
+    if (!third.ok) return;
+
+    const restartedService = new InventoryService(
+        fixture.state,
+        fixture.runtime,
+        fixture.snapshots,
+        new OperationCoordinator(),
+        unusedInventoryAccess,
+    );
+    const fourth = restartedService.checkpoint(third.value.record.id, third.value.record.recordRevision, 80);
+
+    assert.equal(fourth.ok, true);
+    if (!fourth.ok) return;
+    assert.equal(fourth.value.record.inventoryRevision, 4);
+    assert.equal(fourth.value.record.inventoryFallbackRevision, 3);
+    assert.equal(fixture.snapshots.has(snapshotId(fixture.record.id, 1)), false);
+    assert.equal(fixture.snapshots.has(snapshotId(fixture.record.id, 3)), true);
+    assert.equal(fixture.snapshots.has(snapshotId(fixture.record.id, 4)), true);
+    assert.deepEqual(fixture.snapshots.removals, [
+        snapshotId(fixture.record.id, 2),
+        snapshotId(fixture.record.id, 1),
+    ]);
 });
 
 test("restore falls back when the current snapshot disappears during recovery", () => {
@@ -316,7 +347,7 @@ test("dirty checkpoint waits five seconds before replacing the recovery pair", (
     assert.equal(nextCheckpoint.ok, true);
     if (!nextCheckpoint.ok) return;
     assert.equal(nextCheckpoint.value?.record.inventoryRevision, 3);
-    assert.equal(nextCheckpoint.value?.record.inventoryFallbackRevision, 2);
+    assert.equal(nextCheckpoint.value?.record.inventoryFallbackRevision, 1);
 });
 
 test("checkpoint polling skips fake players with pending transfers", () => {

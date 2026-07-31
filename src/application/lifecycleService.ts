@@ -15,12 +15,7 @@ import { DEFAULT_FAKE_PLAYER_SKIN } from "../domain/model.js";
 import { isAllowed, type ActorIdentity, type PermissionAction } from "../domain/permissions.js";
 import { err, ok, type Result } from "../domain/results.js";
 import { formatFakePlayerId, MAX_FAKE_PLAYERS, reserveUniqueName } from "../domain/validation.js";
-import {
-    availableInventoryFallbackRevision,
-    InventoryService,
-    restoreInventorySnapshot,
-    snapshotId,
-} from "./inventoryService.js";
+import { InventoryService, restoreInventorySnapshot, snapshotId } from "./inventoryService.js";
 import type {
     FakePlayerRuntime,
     InventorySnapshotStore,
@@ -165,6 +160,7 @@ export class LifecycleService {
             );
             if (!prepared.ok) return prepared;
 
+            const fallbackRevision = this.inventory.getSessionRecoveryBaselineRevision(context.value.record);
             const snapshotRevision = (context.value.record.inventoryRevision ?? 0) + 1;
             const snapshot = this.snapshots.save(id, snapshotRevision);
             if (!snapshot.ok) return snapshot;
@@ -186,7 +182,6 @@ export class LifecycleService {
             }
             const offline = transitionLifecycle(verified.value, verified.value.recordRevision, { kind: "offline" });
             if (!offline.ok) return offline;
-            const fallbackRevision = availableInventoryFallbackRevision(this.snapshots, context.value.record);
             const finalRecord: FakePlayerRecord = {
                 ...offline.value,
                 inventoryRevision: snapshotRevision,
@@ -199,13 +194,11 @@ export class LifecycleService {
                 finalRecord,
             );
             if (!committed.ok) return committed;
-            if (context.value.record.inventoryFallbackRevision !== null
-                && context.value.record.inventoryFallbackRevision !== fallbackRevision) {
-                const removed = this.snapshots.remove(
-                    snapshotId(id, context.value.record.inventoryFallbackRevision),
-                );
-                if (!removed.ok) return removed;
-            }
+            const cleanup = this.inventory.removeUnreferencedSnapshots(
+                context.value.record,
+                [snapshotRevision, fallbackRevision],
+            );
+            if (!cleanup.ok) return cleanup;
             return ok(committed.value.record);
         } finally {
             lease.value.release();
@@ -349,13 +342,23 @@ export class LifecycleService {
         if (!available.ok) return available;
         const context = this.loadRecord(id, expectedRecordRevision);
         if (!context.ok) return context;
-        if (context.value.record.lifecycle.kind !== "offline") {
-            return err("INVALID_STATE", "彻底删除只允许从 offline 状态开始，请先安全下线。");
+        const lifecycleKind = context.value.record.lifecycle.kind;
+        if (lifecycleKind === "error" && !actor.isOperator) {
+            return err("PERMISSION_DENIED", "只有 OP 可以彻底删除处于错误隔离状态的假人。");
+        }
+        if (lifecycleKind !== "offline" && lifecycleKind !== "error") {
+            return err("INVALID_STATE", "彻底删除只允许从 offline 或 error 状态开始，请先安全下线。");
         }
         const lease = this.coordinator.tryAcquire([`fake:${id}`]);
         if (!lease.ok) return lease;
         try {
-            const operation = createOperation(id, expectedRecordRevision, "delete", "offline", null);
+            const operation = createOperation(
+                id,
+                expectedRecordRevision,
+                "delete",
+                lifecycleKind === "offline" ? "offline" : null,
+                null,
+            );
             const deleting = transitionLifecycle(context.value.record, expectedRecordRevision, {
                 kind: "deleting",
                 operation,

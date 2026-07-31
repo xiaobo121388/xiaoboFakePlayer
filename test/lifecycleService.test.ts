@@ -415,17 +415,23 @@ test("bring online removes the spawned fake player when no inventory snapshot ca
     if (loaded.ok) assert.equal(loaded.state.value.records[offline.value.id]?.lifecycle.kind, "restoring");
 });
 
-test("recovery removes the spawned fake player when a pending restore has no safe snapshot", () => {
+test("recovery isolates a missing snapshot without blocking healthy records or new creation", () => {
     const fixture = createFixture();
     const created = fixture.service.create(operator, createRequest);
     assert.equal(created.ok, true);
     if (!created.ok) return;
-    const offline = fixture.service.takeOffline(operator, created.value.id, created.value.recordRevision);
-    assert.equal(offline.ok, true);
-    if (!offline.ok || offline.value.inventoryRevision === null) return;
-    fixture.snapshots.remove(snapshotId(offline.value.id, offline.value.inventoryRevision));
-    assert.equal(fixture.service.bringOnline(operator, offline.value.id, offline.value.recordRevision).ok, false);
-    fixture.runtime.players.delete(offline.value.id);
+    const healthy = fixture.service.create(operator, { ...createRequest, requestedName: "Steve" });
+    assert.equal(healthy.ok, true);
+    if (!healthy.ok) return;
+    const first = fixture.inventory.checkpoint(created.value.id, created.value.recordRevision, 10);
+    assert.equal(first.ok, true);
+    if (!first.ok) return;
+    const second = fixture.inventory.checkpoint(first.value.record.id, first.value.record.recordRevision, 20);
+    assert.equal(second.ok, true);
+    if (!second.ok) return;
+    fixture.snapshots.remove(snapshotId(created.value.id, 1));
+    fixture.snapshots.remove(snapshotId(created.value.id, 2));
+    fixture.runtime.players.delete(created.value.id);
     const recovery = new RecoveryRunner(
         fixture.state,
         fixture.runtime,
@@ -436,9 +442,45 @@ test("recovery removes the spawned fake player when a pending restore has no saf
 
     const result = recovery.run();
 
-    assert.equal(result.ok, false);
-    if (!result.ok) assert.equal(result.error.code, "NOT_FOUND");
-    assert.equal(fixture.runtime.get(offline.value.id), undefined);
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.match(result.value.diagnostics.join("; "), /已隔离库存恢复错误/);
+    assert.equal(fixture.runtime.get(created.value.id), undefined);
+    assert.equal(fixture.runtime.get(healthy.value.id)?.alive, true);
+    const loaded = fixture.state.loadCatalog();
+    assert.equal(loaded.ok, true);
+    if (!loaded.ok) return;
+    const isolated = loaded.state.value.records[created.value.id];
+    assert.equal(isolated?.lifecycle.kind, "error");
+    if (isolated?.lifecycle.kind === "error") assert.match(isolated.lifecycle.message, /NOT_FOUND: 库存快照 .* 不存在/);
+    const next = fixture.service.create(operator, { ...createRequest, requestedName: "Builder" });
+    assert.equal(next.ok, true);
+    if (next.ok) assert.equal(next.value.id, "fp0003");
+    const member = { playerId: "playfab-member", isOperator: false };
+    const permissions = fixture.state.loadPermissions();
+    assert.equal(permissions.ok, true);
+    if (!permissions.ok) return;
+    assert.equal(fixture.state.commitPermissions(permissions.state.revision, {
+        grants: {
+            [member.playerId]: {
+                playerId: member.playerId,
+                lastKnownName: "Member",
+                canPlace: true,
+                canSet: true,
+            },
+        },
+    }).ok, true);
+    const denied = fixture.service.purge(member, isolated!.id, isolated!.recordRevision);
+    assert.equal(denied.ok, false);
+    if (!denied.ok) assert.equal(denied.error.code, "PERMISSION_DENIED");
+    const recycleDenied = fixture.service.recycle(member, isolated!.id, isolated!.recordRevision);
+    assert.equal(recycleDenied.ok, false);
+    if (!recycleDenied.ok) assert.equal(recycleDenied.error.code, "INVALID_STATE");
+    const purged = fixture.service.purge(operator, isolated!.id, isolated!.recordRevision);
+    assert.deepEqual(purged, { ok: true, value: { id: isolated!.id, name: isolated!.name } });
+    const afterPurge = fixture.state.loadCatalog();
+    assert.equal(afterPurge.ok, true);
+    if (afterPurge.ok) assert.equal(afterPurge.state.value.records[isolated!.id], undefined);
 });
 
 test("operation coordinator sorts, deduplicates, and releases resource keys", () => {
@@ -690,6 +732,33 @@ test("offline rename changes the reserved name without spawning an entity", () =
     assert.equal(renamed.value.name, "Storage");
     assert.equal(renamed.value.lifecycle.kind, "offline");
     assert.equal(fixture.runtime.players.has(created.value.id), false);
+});
+
+test("safe offline retains the session recovery baseline after multiple checkpoints", () => {
+    const fixture = createFixture();
+    const created = fixture.service.create(operator, createRequest);
+    assert.equal(created.ok, true);
+    if (!created.ok) return;
+    const first = fixture.inventory.checkpoint(created.value.id, created.value.recordRevision, 10);
+    assert.equal(first.ok, true);
+    if (!first.ok) return;
+    const second = fixture.inventory.checkpoint(first.value.record.id, first.value.record.recordRevision, 20);
+    assert.equal(second.ok, true);
+    if (!second.ok) return;
+    const third = fixture.inventory.checkpoint(second.value.record.id, second.value.record.recordRevision, 30);
+    assert.equal(third.ok, true);
+    if (!third.ok) return;
+
+    const offline = fixture.service.takeOffline(operator, third.value.record.id, third.value.record.recordRevision);
+
+    assert.equal(offline.ok, true);
+    if (!offline.ok) return;
+    assert.equal(offline.value.inventoryRevision, 4);
+    assert.equal(offline.value.inventoryFallbackRevision, 1);
+    assert.deepEqual([...fixture.snapshots.saved].sort(), [
+        snapshotId(created.value.id, 1),
+        snapshotId(created.value.id, 4),
+    ]);
 });
 
 test("purge refuses online records then removes an offline record and its snapshot", () => {

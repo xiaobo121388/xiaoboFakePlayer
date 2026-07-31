@@ -1,6 +1,6 @@
 import { advanceLifecycleOperation, transitionLifecycle } from "../domain/lifecycle.js";
 import type { FakePlayerRecord, LifecycleOperation, WorldCatalog } from "../domain/model.js";
-import { err, ok, type Result } from "../domain/results.js";
+import { err, ok, type DomainError, type Result } from "../domain/results.js";
 import {
     availableInventoryFallbackRevision,
     InventoryService,
@@ -70,7 +70,13 @@ export class RecoveryRunner {
         ];
         for (const id of Object.keys(catalog.state.value.records).sort()) {
             const recovered = this.recoverRecord(id);
-            if (!recovered.ok) return recovered;
+            if (!recovered.ok) {
+                const isolated = this.isolateMissingSnapshot(id, recovered.error);
+                if (!isolated.ok) return isolated;
+                recoveredRecords += 1;
+                diagnostics.push(`${id}: ${isolated.value}`);
+                continue;
+            }
             if (recovered.value !== "unchanged") {
                 recoveredRecords += 1;
                 diagnostics.push(`${id}: ${recovered.value}`);
@@ -82,6 +88,44 @@ export class RecoveryRunner {
             reboundEntities: tagged.length,
             diagnostics,
         });
+    }
+
+    private isolateMissingSnapshot(id: string, failure: DomainError): Result<string> {
+        if (failure.code !== "NOT_FOUND" || this.runtime.get(id) !== undefined) return err(failure.code, failure.message);
+        const operations = this.stateStore.loadOperations();
+        if (!operations.ok) return err("CONFLICT", operations.diagnostics.join("; "));
+        const hasPendingTransfer = [
+            ...Object.values(operations.state.value.inventoryTransfers),
+            ...Object.values(operations.state.value.experienceTransfers),
+        ].some((transfer) => transfer.fakePlayerId === id);
+        if (hasPendingTransfer) return err(failure.code, failure.message);
+
+        const lease = this.coordinator.tryAcquire([`fake:${id}`]);
+        if (!lease.ok) return lease;
+        try {
+            const loaded = this.stateStore.loadCatalog();
+            if (!loaded.ok) return err("CONFLICT", loaded.diagnostics.join("; "));
+            const record = loaded.state.value.records[id];
+            if (record === undefined) return err("NOT_FOUND", `隔离恢复错误时未找到假人 ${id}。`);
+            const operation = "operation" in record.lifecycle ? record.lifecycle.operation : undefined;
+            const isolated = transitionLifecycle(record, record.recordRevision, {
+                kind: "error",
+                message: `${failure.code}: ${failure.message}`,
+                ...(operation === undefined ? {} : { operation }),
+            });
+            if (!isolated.ok) return isolated;
+            const committed = commitCatalogRecord(
+                this.stateStore,
+                loaded.state.revision,
+                loaded.state.value,
+                isolated.value,
+            );
+            return committed.ok
+                ? ok(`已隔离库存恢复错误：${failure.message}`)
+                : committed;
+        } finally {
+            lease.value.release();
+        }
     }
 
     private restorePendingOnlineRuntimes(
@@ -272,7 +316,7 @@ export class RecoveryRunner {
                 && this.snapshots.has(snapshotId(record.id, pending.inventoryFallbackRevision))
                 ? pending.inventoryFallbackRevision
                 : null
-            : availableInventoryFallbackRevision(this.snapshots, pending);
+            : this.inventory.getSessionRecoveryBaselineRevision(pending);
         const finalRecord: FakePlayerRecord = {
             ...offline.value,
             inventoryRevision: snapshotRevision,
@@ -281,12 +325,11 @@ export class RecoveryRunner {
         };
         const committed = commitCatalogRecord(this.stateStore, currentCatalogRevision, currentCatalog, finalRecord);
         if (!committed.ok) return committed;
-        if (pending.inventoryFallbackRevision !== null
-            && pending.inventoryFallbackRevision !== snapshotRevision
-            && pending.inventoryFallbackRevision !== fallbackRevision) {
-            const removed = this.snapshots.remove(snapshotId(record.id, pending.inventoryFallbackRevision));
-            if (!removed.ok) return removed;
-        }
+        const cleanup = this.inventory.removeUnreferencedSnapshots(
+            pending,
+            [snapshotRevision, fallbackRevision],
+        );
+        if (!cleanup.ok) return cleanup;
         return ok(usedPriorSnapshot
             ? `已从旧库存快照 ${snapshotRevision} 完成下线恢复`
             : "completed snapshotting");

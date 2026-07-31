@@ -111,11 +111,12 @@ async function openDetailForm(player: Player, services: CommandServices, record:
         if (!ready(player, services)) return;
         const actions: (() => Promise<void>)[] = [];
         const position = record.location.position;
+        const errorDetail = record.lifecycle.kind === "error" ? `\n${record.lifecycle.message}` : "";
         const form = new ActionFormData()
             .title(record.name)
             .body(`${record.id} · ${record.lifecycle.kind}\n${record.location.dimension}\n`
                 + `${position.x.toFixed(1)}, ${position.y.toFixed(1)}, ${position.z.toFixed(1)}\n`
-                + `rev ${record.recordRevision} · inventory ${record.inventoryRevision ?? "-"}`);
+            + `rev ${record.recordRevision} · inventory ${record.inventoryRevision ?? "-"}${errorDetail}`);
 
         if (record.lifecycle.kind === "online") {
             form.button(t("xiaobo.fp.form.detail.actions"));
@@ -157,6 +158,9 @@ async function openDetailForm(player: Player, services: CommandServices, record:
         if (record.lifecycle.kind === "offline") {
             form.button(t("xiaobo.fp.form.detail.recycle_delete"));
             actions.push(() => confirmRecycleDelete(player, services, record));
+        }
+        if (record.lifecycle.kind === "offline"
+            || (record.lifecycle.kind === "error" && actorIdentity(player).isOperator)) {
             form.button(t("xiaobo.fp.form.detail.purge"));
             actions.push(() => confirmPurge(player, services, record));
         }
@@ -372,7 +376,8 @@ async function showRecoveryForm(player: Player, services: CommandServices): Prom
         && record.lifecycle.kind !== "offline");
     const lifecycleBody = exceptional.length === 0
         ? t("xiaobo.fp.form.recovery.no_lifecycle")
-        : exceptional.map((record) => `${record.id} ${record.name}: ${record.lifecycle.kind}`).join("\n");
+        : exceptional.map((record) => `${record.id} ${record.name}: ${record.lifecycle.kind}`
+            + (record.lifecycle.kind === "error" ? `\n${record.lifecycle.message}` : "")).join("\n");
     const lifecycleMessage: RawMessage = typeof lifecycleBody === "string"
         ? { text: lifecycleBody }
         : lifecycleBody;

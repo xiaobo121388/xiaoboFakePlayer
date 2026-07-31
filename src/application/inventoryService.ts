@@ -60,6 +60,7 @@ export interface FakePlayerInventoryOverview {
 
 export class InventoryService {
     private readonly dirty = new Set<FakePlayerId>();
+    private readonly sessionRecoveryBaselines = new Map<FakePlayerId, number>();
     private lastAttemptedId: FakePlayerId | undefined;
 
     public constructor(
@@ -72,6 +73,33 @@ export class InventoryService {
 
     public markDirty(id: FakePlayerId): void {
         this.dirty.add(id);
+    }
+
+    public getSessionRecoveryBaselineRevision(record: FakePlayerRecord): number | null {
+        const pinned = this.sessionRecoveryBaselines.get(record.id);
+        if (pinned !== undefined && this.snapshots.has(snapshotId(record.id, pinned))) return pinned;
+        const available = availableInventoryFallbackRevision(this.snapshots, record);
+        if (available === null) {
+            this.sessionRecoveryBaselines.delete(record.id);
+        } else {
+            this.sessionRecoveryBaselines.set(record.id, available);
+        }
+        return available;
+    }
+
+    public removeUnreferencedSnapshots(
+        record: Pick<FakePlayerRecord, "id" | "inventoryRevision" | "inventoryFallbackRevision">,
+        retainedRevisions: readonly (number | null)[],
+    ): Result<void> {
+        const retained = new Set(retainedRevisions);
+        const prior = new Set([record.inventoryRevision, record.inventoryFallbackRevision]);
+        for (const revision of prior) {
+            if (revision === null || retained.has(revision)) continue;
+            const structureId = snapshotId(record.id, revision);
+            const removed = this.snapshots.remove(structureId);
+            if (!removed.ok) return removed;
+        }
+        return ok(undefined);
     }
 
     public getPlayerMainhandItemTypeId(actor: ActorIdentity): Result<string | null> {
@@ -356,18 +384,13 @@ export class InventoryService {
             return err("INVALID_STATE", `假人 ${id} 没有存活的在线实例。`);
         }
 
+        const recoveryBaselineRevision = this.getSessionRecoveryBaselineRevision(record);
         const snapshotRevision = (record.inventoryRevision ?? 0) + 1;
         const saved = this.snapshots.save(id, snapshotRevision);
         if (!saved.ok) return saved;
-        const currentSnapshotExists = record.inventoryRevision !== null
-            && this.snapshots.has(snapshotId(id, record.inventoryRevision));
-        const fallbackSnapshotExists = record.inventoryFallbackRevision !== null
-            && this.snapshots.has(snapshotId(id, record.inventoryFallbackRevision));
-        const fallbackRevision = currentSnapshotExists
-            ? record.inventoryRevision
-            : fallbackSnapshotExists
-                ? record.inventoryFallbackRevision
-                : null;
+        const fallbackRevision = recoveryBaselineRevision === snapshotRevision
+            ? null
+            : recoveryBaselineRevision;
         const nextRecord: FakePlayerRecord = {
             ...record,
             recordRevision: record.recordRevision + 1,
@@ -392,13 +415,10 @@ export class InventoryService {
         }
 
         this.dirty.delete(id);
-        if (record.inventoryFallbackRevision !== null
-            && record.inventoryFallbackRevision !== fallbackRevision) {
-            const obsoleteId = snapshotId(id, record.inventoryFallbackRevision);
-            const removed = this.snapshots.remove(obsoleteId);
-            if (!removed.ok) {
-                return err("CONFLICT", `新快照 ${saved.value} 已提交，但过期快照 ${obsoleteId} 清理失败：${removed.error.message}`);
-            }
+        if (recoveryBaselineRevision === null) this.sessionRecoveryBaselines.set(id, snapshotRevision);
+        const cleanup = this.removeUnreferencedSnapshots(record, [snapshotRevision, fallbackRevision]);
+        if (!cleanup.ok) {
+            return err("CONFLICT", `新快照 ${saved.value} 已提交，但过期快照清理失败：${cleanup.error.message}`);
         }
         return ok({ record: nextRecord, structureId: saved.value });
     }

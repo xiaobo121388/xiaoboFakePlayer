@@ -105,7 +105,8 @@ export function registerCommands(registry, services) {
                     || record.name.toLowerCase() === reference);
             lines.push(`records=${listed.value.length}`);
             records.forEach((record) => lines.push(`${record.id} ${record.name}: lifecycle=${record.lifecycle.kind}, record=${record.recordRevision}, `
-                + `inventory=${record.inventoryRevision ?? "-"}, skin=${record.skin.kind}`));
+                + `inventory=${record.inventoryRevision ?? "-"}, skin=${record.skin.kind}`
+                + (record.lifecycle.kind === "error" ? `, error=${record.lifecycle.message}` : "")));
             if (reference !== undefined && reference.length > 0 && records.length === 0) {
                 lines.push(`record=${args[0]} not-found`);
             }

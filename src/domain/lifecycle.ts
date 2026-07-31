@@ -11,7 +11,7 @@ const ALLOWED_TRANSITIONS: Readonly<Record<LifecycleStatus["kind"], ReadonlySet<
     respawning: new Set(["online", "error"]),
     deleting: new Set(["offline", "error"]),
     missing: new Set(["restoring", "error"]),
-    error: new Set(["offline", "restoring"]),
+    error: new Set(["deleting", "offline", "restoring"]),
 };
 
 export function transitionLifecycle(

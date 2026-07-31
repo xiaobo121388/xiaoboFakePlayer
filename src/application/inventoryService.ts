@@ -20,7 +20,8 @@ import type {
     WorldStateStore,
 } from "./ports.js";
 
-const PERIODIC_CHECKPOINT_INTERVAL_TICKS = 20;
+const PERIODIC_CHECKPOINT_INTERVAL_TICKS = 600;
+const DIRTY_CHECKPOINT_INTERVAL_TICKS = 100;
 
 export interface InventoryCheckpoint {
     readonly record: FakePlayerRecord;
@@ -151,7 +152,11 @@ export class InventoryService {
                 record.lifecycle.kind === "online"
                 && this.runtime.get(record.id)?.alive === true
                 && !pendingIds.has(record.id)
-                && (this.dirty.has(record.id) || checkpointDue(record, currentTick))
+                && (
+                    checkpointDue(record, currentTick, PERIODIC_CHECKPOINT_INTERVAL_TICKS)
+                    || (this.dirty.has(record.id)
+                        && checkpointDue(record, currentTick, DIRTY_CHECKPOINT_INTERVAL_TICKS))
+                )
             ))
             .sort((left, right) => this.compareCheckpointPriority(left, right));
         const lastIndex = candidates.findIndex((record) => record.id === this.lastAttemptedId);
@@ -862,36 +867,34 @@ export function restoreInventorySnapshot(
         return ok({ inventoryRevision: null, inventoryFallbackRevision: null, usedFallback: false });
     }
     const currentId = snapshotId(record.id, record.inventoryRevision);
-    if (snapshots.has(currentId)) {
-        const restored = snapshots.restore(record.id, currentId);
-        return restored.ok
-            ? ok({
-                inventoryRevision: record.inventoryRevision,
-                inventoryFallbackRevision: record.inventoryFallbackRevision,
-                usedFallback: false,
-            })
-            : restored;
+    const restored = snapshots.restore(record.id, currentId);
+    if (restored.ok) {
+        return ok({
+            inventoryRevision: record.inventoryRevision,
+            inventoryFallbackRevision: record.inventoryFallbackRevision,
+            usedFallback: false,
+        });
     }
+    if (restored.error.code !== "NOT_FOUND") return restored;
     if (record.inventoryFallbackRevision !== null) {
         const fallbackId = snapshotId(record.id, record.inventoryFallbackRevision);
-        if (snapshots.has(fallbackId)) {
-            const restored = snapshots.restore(record.id, fallbackId);
-            return restored.ok
-                ? ok({
-                    inventoryRevision: record.inventoryFallbackRevision,
-                    inventoryFallbackRevision: null,
-                    usedFallback: true,
-                })
-                : restored;
+        const fallback = snapshots.restore(record.id, fallbackId);
+        if (fallback.ok) {
+            return ok({
+                inventoryRevision: record.inventoryFallbackRevision,
+                inventoryFallbackRevision: null,
+                usedFallback: true,
+            });
         }
+        if (fallback.error.code !== "NOT_FOUND") return fallback;
     }
     return err("NOT_FOUND", `库存快照 ${currentId} 不存在，且没有可用的上一代快照。`);
 }
 
-function checkpointDue(record: FakePlayerRecord, currentTick: number): boolean {
+function checkpointDue(record: FakePlayerRecord, currentTick: number, intervalTicks: number): boolean {
     return record.lastCheckpointTick === null
         || currentTick < record.lastCheckpointTick
-        || currentTick - record.lastCheckpointTick >= PERIODIC_CHECKPOINT_INTERVAL_TICKS;
+        || currentTick - record.lastCheckpointTick >= intervalTicks;
 }
 
 function commitRecord(

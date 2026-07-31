@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { InventoryService, snapshotId } from "../src/application/inventoryService.js";
+import {
+    InventoryService,
+    restoreInventorySnapshot,
+    snapshotId,
+} from "../src/application/inventoryService.js";
 import { OperationCoordinator } from "../src/application/operationCoordinator.js";
 import type {
     InventoryAccess,
@@ -113,6 +117,7 @@ class MemoryRuntime implements FakePlayerRuntime {
 
 class MemorySnapshots implements InventorySnapshotStore {
     public readonly ids = new Set<string>();
+    public readonly missingOnRestore = new Set<string>();
     public readonly removals: string[] = [];
 
     public save(fakePlayerId: FakePlayerId, revision: number): Result<string> {
@@ -121,8 +126,11 @@ class MemorySnapshots implements InventorySnapshotStore {
         return ok(id);
     }
 
-    public restore(): Result<void> {
-        return ok(undefined);
+    public restore(_fakePlayerId: FakePlayerId, structureId: string): Result<void> {
+        if (this.missingOnRestore.delete(structureId)) this.ids.delete(structureId);
+        return this.ids.has(structureId)
+            ? ok(undefined)
+            : err("NOT_FOUND", `snapshot ${structureId} missing`);
     }
 
     public remove(structureId: string): Result<void> {
@@ -231,6 +239,25 @@ test("checkpoint rotation retains exactly the current and previous snapshots", (
     assert.deepEqual(fixture.snapshots.removals, [snapshotId(fixture.record.id, 1)]);
 });
 
+test("restore falls back when the current snapshot disappears during recovery", () => {
+    const fixture = createFixture();
+    const currentId = snapshotId(fixture.record.id, 2);
+    fixture.snapshots.ids.add(currentId);
+    fixture.snapshots.missingOnRestore.add(currentId);
+
+    const result = restoreInventorySnapshot(fixture.snapshots, {
+        ...fixture.record,
+        inventoryRevision: 2,
+        inventoryFallbackRevision: 1,
+    });
+
+    assert.deepEqual(result, ok({
+        inventoryRevision: 1,
+        inventoryFallbackRevision: null,
+        usedFallback: true,
+    }));
+});
+
 test("checkpoint polling skips a clean fake player before its next periodic checkpoint", () => {
     const fixture = createFixture();
 
@@ -241,7 +268,7 @@ test("checkpoint polling skips a clean fake player before its next periodic chec
     assert.deepEqual(fixture.snapshots.removals, []);
 });
 
-test("checkpoint polling saves all ten online fake players once within twenty ticks", () => {
+test("checkpoint polling saves all ten online fake players once when the full-save interval is due", () => {
     const fixture = createFixture();
     const records = Object.fromEntries(Array.from({ length: 10 }, (_, index) => {
         const sequence = index + 1;
@@ -259,17 +286,37 @@ test("checkpoint polling saves all ten online fake players once within twenty ti
     fixture.state.catalog = { nextId: 11, records };
 
     const checkpointedIds: FakePlayerId[] = [];
-    for (let tick = 20; tick < 40; tick += 2) {
+    for (let tick = 600; tick < 620; tick += 2) {
         const result = fixture.service.checkpointNext(tick);
         assert.equal(result.ok, true);
         if (result.ok && result.value !== undefined) checkpointedIds.push(result.value.record.id);
     }
 
     assert.deepEqual(checkpointedIds, Object.keys(records));
-    assert.deepEqual(fixture.service.checkpointNext(39), ok(undefined));
-    const nextSecond = fixture.service.checkpointNext(40);
+    assert.deepEqual(fixture.service.checkpointNext(1199), ok(undefined));
+    const nextSecond = fixture.service.checkpointNext(1200);
     assert.equal(nextSecond.ok, true);
     if (nextSecond.ok) assert.equal(nextSecond.value?.record.id, "fp0001");
+});
+
+test("dirty checkpoint waits five seconds before replacing the recovery pair", () => {
+    const fixture = createFixture();
+    fixture.service.markDirty(fixture.record.id);
+
+    assert.deepEqual(fixture.service.checkpointNext(109), ok(undefined));
+    const checkpoint = fixture.service.checkpointNext(110);
+
+    assert.equal(checkpoint.ok, true);
+    if (!checkpoint.ok) return;
+    assert.equal(checkpoint.value?.record.inventoryRevision, 2);
+    assert.equal(checkpoint.value?.record.inventoryFallbackRevision, 1);
+    fixture.service.markDirty(fixture.record.id);
+    assert.deepEqual(fixture.service.checkpointNext(209), ok(undefined));
+    const nextCheckpoint = fixture.service.checkpointNext(210);
+    assert.equal(nextCheckpoint.ok, true);
+    if (!nextCheckpoint.ok) return;
+    assert.equal(nextCheckpoint.value?.record.inventoryRevision, 3);
+    assert.equal(nextCheckpoint.value?.record.inventoryFallbackRevision, 2);
 });
 
 test("checkpoint polling skips fake players with pending transfers", () => {

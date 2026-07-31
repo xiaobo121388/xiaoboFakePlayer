@@ -1,7 +1,8 @@
 import { INVENTORY_SLOT_COUNT, TOTAL_SLOT_COUNT } from "../domain/inventory.js";
 import { isAllowed } from "../domain/permissions.js";
 import { err, ok } from "../domain/results.js";
-const PERIODIC_CHECKPOINT_INTERVAL_TICKS = 20;
+const PERIODIC_CHECKPOINT_INTERVAL_TICKS = 600;
+const DIRTY_CHECKPOINT_INTERVAL_TICKS = 100;
 export class InventoryService {
     stateStore;
     runtime;
@@ -92,7 +93,9 @@ export class InventoryService {
             .filter((record) => (record.lifecycle.kind === "online"
             && this.runtime.get(record.id)?.alive === true
             && !pendingIds.has(record.id)
-            && (this.dirty.has(record.id) || checkpointDue(record, currentTick))))
+            && (checkpointDue(record, currentTick, PERIODIC_CHECKPOINT_INTERVAL_TICKS)
+                || (this.dirty.has(record.id)
+                    && checkpointDue(record, currentTick, DIRTY_CHECKPOINT_INTERVAL_TICKS)))))
             .sort((left, right) => this.compareCheckpointPriority(left, right));
         const lastIndex = candidates.findIndex((record) => record.id === this.lastAttemptedId);
         const rotated = lastIndex < 0
@@ -826,35 +829,35 @@ export function restoreInventorySnapshot(snapshots, record) {
         return ok({ inventoryRevision: null, inventoryFallbackRevision: null, usedFallback: false });
     }
     const currentId = snapshotId(record.id, record.inventoryRevision);
-    if (snapshots.has(currentId)) {
-        const restored = snapshots.restore(record.id, currentId);
-        return restored.ok
-            ? ok({
-                inventoryRevision: record.inventoryRevision,
-                inventoryFallbackRevision: record.inventoryFallbackRevision,
-                usedFallback: false,
-            })
-            : restored;
+    const restored = snapshots.restore(record.id, currentId);
+    if (restored.ok) {
+        return ok({
+            inventoryRevision: record.inventoryRevision,
+            inventoryFallbackRevision: record.inventoryFallbackRevision,
+            usedFallback: false,
+        });
     }
+    if (restored.error.code !== "NOT_FOUND")
+        return restored;
     if (record.inventoryFallbackRevision !== null) {
         const fallbackId = snapshotId(record.id, record.inventoryFallbackRevision);
-        if (snapshots.has(fallbackId)) {
-            const restored = snapshots.restore(record.id, fallbackId);
-            return restored.ok
-                ? ok({
-                    inventoryRevision: record.inventoryFallbackRevision,
-                    inventoryFallbackRevision: null,
-                    usedFallback: true,
-                })
-                : restored;
+        const fallback = snapshots.restore(record.id, fallbackId);
+        if (fallback.ok) {
+            return ok({
+                inventoryRevision: record.inventoryFallbackRevision,
+                inventoryFallbackRevision: null,
+                usedFallback: true,
+            });
         }
+        if (fallback.error.code !== "NOT_FOUND")
+            return fallback;
     }
     return err("NOT_FOUND", `库存快照 ${currentId} 不存在，且没有可用的上一代快照。`);
 }
-function checkpointDue(record, currentTick) {
+function checkpointDue(record, currentTick, intervalTicks) {
     return record.lastCheckpointTick === null
         || currentTick < record.lastCheckpointTick
-        || currentTick - record.lastCheckpointTick >= PERIODIC_CHECKPOINT_INTERVAL_TICKS;
+        || currentTick - record.lastCheckpointTick >= intervalTicks;
 }
 function commitRecord(store, catalogRevision, catalog, record) {
     const committed = store.commitCatalog(catalogRevision, {

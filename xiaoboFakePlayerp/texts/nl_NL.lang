@@ -21,6 +21,7 @@ xiaobo.fp.form.detail.purge=Gevaar: inhoud opgeven en verwijderen
 xiaobo.fp.form.action.teleport=Hierheen teleporteren
 xiaobo.fp.form.action.navigate=Hierheen navigeren
 xiaobo.fp.form.action.lookat=Naar mij kijken (eenmalig)
+xiaobo.fp.form.action.lookat_coordinates=Naar coördinaten kijken
 xiaobo.fp.form.action.lookat_continuous=Naar mij kijken (doorlopend)
 xiaobo.fp.form.action.jump=Springen
 xiaobo.fp.form.action.sneak=Beginnen met sluipen

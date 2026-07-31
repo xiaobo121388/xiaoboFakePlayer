@@ -21,6 +21,7 @@ xiaobo.fp.form.detail.purge=Zagrożenie: porzuć zawartość i usuń
 xiaobo.fp.form.action.teleport=Teleportuj tutaj
 xiaobo.fp.form.action.navigate=Przyjdź tutaj
 xiaobo.fp.form.action.lookat=Patrz na mnie (raz)
+xiaobo.fp.form.action.lookat_coordinates=Patrz na współrzędne
 xiaobo.fp.form.action.lookat_continuous=Patrz na mnie (ciągle)
 xiaobo.fp.form.action.jump=Skok
 xiaobo.fp.form.action.sneak=Zacznij się skradać

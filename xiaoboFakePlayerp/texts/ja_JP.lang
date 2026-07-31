@@ -21,6 +21,7 @@ xiaobo.fp.form.detail.purge=危険：中身を放棄して完全削除
 xiaobo.fp.form.action.teleport=ここにテレポート
 xiaobo.fp.form.action.navigate=ここへ誘導
 xiaobo.fp.form.action.lookat=こちらを見る（1回）
+xiaobo.fp.form.action.lookat_coordinates=座標を見る
 xiaobo.fp.form.action.lookat_continuous=こちらを見る（連続）
 xiaobo.fp.form.action.jump=ジャンプ
 xiaobo.fp.form.action.sneak=スニーク開始

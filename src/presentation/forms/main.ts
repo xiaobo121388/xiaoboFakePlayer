@@ -176,7 +176,7 @@ async function openDetailForm(player: Player, services: CommandServices, record:
 
 async function openActionForm(player: Player, services: CommandServices, record: FakePlayerRecord): Promise<void> {
     await formBoundary(player, `actions:${record.id}`, async () => {
-        const entries: [RawMessage, FakePlayerAction][] = [
+        const entries: [RawMessage, FakePlayerAction | "look_at_coordinates"][] = [
             [t("xiaobo.fp.form.action.teleport"), { kind: "teleport", location: playerLocation(player) }],
             [t("xiaobo.fp.form.action.navigate"), {
                 kind: "navigate",
@@ -188,6 +188,7 @@ async function openActionForm(player: Player, services: CommandServices, record:
                 dimension: player.dimension.id,
                 position: player.getHeadLocation(),
             }],
+            [t("xiaobo.fp.form.action.lookat_coordinates"), "look_at_coordinates"],
             [t("xiaobo.fp.form.action.lookat_continuous"), { kind: "look_at_entity", targetId: player.id }],
             [t("xiaobo.fp.form.action.jump"), { kind: "jump" }],
             [t("xiaobo.fp.form.action.stop"), { kind: "stop" }],
@@ -208,6 +209,10 @@ async function openActionForm(player: Player, services: CommandServices, record:
         }
         const selected = entries[response.selection];
         if (selected === undefined) return;
+        if (selected[1] === "look_at_coordinates") {
+            await openLookAtCoordinatesForm(player, services, record);
+            return;
+        }
         const current = loadCurrentRecord(player, services, record.id);
         if (!current.ok) return sendError(player, current.error.message);
         const action = selected[1].kind === "look_at_once"
@@ -222,6 +227,35 @@ async function openActionForm(player: Player, services: CommandServices, record:
         if (!result.ok) return sendError(player, result.error.message);
         player.sendMessage({ translate: "xiaobo.fp.message.action_ok", with: [current.value.name] });
     });
+}
+
+async function openLookAtCoordinatesForm(
+    player: Player,
+    services: CommandServices,
+    record: FakePlayerRecord,
+): Promise<void> {
+    const target = player.getHeadLocation();
+    const response = await new ModalFormData()
+        .title(t("xiaobo.fp.form.action.lookat_coordinates"))
+        .textField(t("xiaobo.fp.form.behavior.place.x"), "0", { defaultValue: String(target.x) })
+        .textField(t("xiaobo.fp.form.behavior.place.y"), "64", { defaultValue: String(target.y) })
+        .textField(t("xiaobo.fp.form.behavior.place.z"), "0", { defaultValue: String(target.z) })
+        .submitButton(t("xiaobo.fp.form.action.lookat_coordinates"))
+        .show(player);
+    if (response.canceled || response.formValues === undefined || !ready(player, services)) return;
+    const [x, y, z] = response.formValues;
+    const position = { x: Number(x), y: Number(y), z: Number(z) };
+    if (!finitePoint(position)) return sendError(player, "看向坐标必须是有限数字。");
+    const current = loadCurrentRecord(player, services, record.id);
+    if (!current.ok) return sendError(player, current.error.message);
+    const result = services.behavior.perform(
+        actorIdentity(player),
+        current.value.id,
+        current.value.recordRevision,
+        { kind: "look_at_once", dimension: player.dimension.id, position },
+    );
+    if (!result.ok) return sendError(player, result.error.message);
+    player.sendMessage({ translate: "xiaobo.fp.message.action_ok", with: [current.value.name] });
 }
 
 async function openEntityInteractionForm(

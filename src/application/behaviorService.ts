@@ -11,7 +11,6 @@ import type {
     FakePlayerId,
     FakePlayerRecord,
     Point,
-    Rotation,
     SavedLocation,
 } from "../domain/model.js";
 import { isAllowed, type ActorIdentity } from "../domain/permissions.js";
@@ -1254,10 +1253,9 @@ function mapAction(
                 return err("INVALID_STATE", "目标坐标所在区块未加载。");
             }
             if (action.kind === "look_at") return ok({ kind: "look_at", position: action.position });
-            const rotation = lookRotation(runtime.headPosition, action.position);
-            return rotation === undefined
+            return distanceSquared(runtime.headPosition, action.position) < 0.000001
                 ? err("INVALID_STATE", "目标眼睛与假人眼睛重合，无需转向。")
-                : ok({ kind: "look_at_once", rotation });
+                : ok({ kind: "look_at_once", position: action.position });
         }
         case "look_at_entity":
         {
@@ -1333,18 +1331,6 @@ function mapAction(
                 : target;
         }
     }
-}
-
-function lookRotation(origin: Point, target: Point): Rotation | undefined {
-    const x = target.x - origin.x;
-    const y = target.y - origin.y;
-    const z = target.z - origin.z;
-    const horizontalDistance = Math.sqrt(x * x + z * z);
-    if (horizontalDistance < 0.001 && Math.abs(y) < 0.001) return undefined;
-    return {
-        x: -Math.atan2(y, horizontalDistance) * 180 / Math.PI,
-        y: Math.atan2(-x, z) * 180 / Math.PI,
-    };
 }
 
 function validateCoordinateTarget(

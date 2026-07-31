@@ -21,6 +21,7 @@ xiaobo.fp.form.detail.purge=Veszély: tartalom elvetése és törlés
 xiaobo.fp.form.action.teleport=Ide teleportálás
 xiaobo.fp.form.action.navigate=Ide navigálás
 xiaobo.fp.form.action.lookat=Nézzen rám (egyszer)
+xiaobo.fp.form.action.lookat_coordinates=Nézzen a koordinátákra
 xiaobo.fp.form.action.lookat_continuous=Nézzen rám (folyamatos)
 xiaobo.fp.form.action.jump=Ugrás
 xiaobo.fp.form.action.sneak=Lopakodás elkezdése

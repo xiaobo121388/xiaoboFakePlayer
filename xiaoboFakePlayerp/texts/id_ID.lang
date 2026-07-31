@@ -21,6 +21,7 @@ xiaobo.fp.form.detail.purge=Bahaya: Buang Isi dan Hapus
 xiaobo.fp.form.action.teleport=Teleport ke Sini
 xiaobo.fp.form.action.navigate=Navigasi ke Sini
 xiaobo.fp.form.action.lookat=Lihat ke Aku (Sekali)
+xiaobo.fp.form.action.lookat_coordinates=Lihat ke Koordinat
 xiaobo.fp.form.action.lookat_continuous=Lihat ke Aku (Terus-menerus)
 xiaobo.fp.form.action.jump=Lompat
 xiaobo.fp.form.action.sneak=Mulai Menyelinap

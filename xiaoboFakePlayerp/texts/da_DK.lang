@@ -21,6 +21,7 @@ xiaobo.fp.form.detail.purge=Fare: Opgiv Indhold og Slet
 xiaobo.fp.form.action.teleport=Teleporter Hertil
 xiaobo.fp.form.action.navigate=Naviger Hertil
 xiaobo.fp.form.action.lookat=Se på Mig (Én Gang)
+xiaobo.fp.form.action.lookat_coordinates=Se mod koordinater
 xiaobo.fp.form.action.lookat_continuous=Se på Mig (Løbende)
 xiaobo.fp.form.action.jump=Hop
 xiaobo.fp.form.action.sneak=Start Snige

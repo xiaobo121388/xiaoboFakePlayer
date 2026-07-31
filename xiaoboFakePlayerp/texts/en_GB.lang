@@ -21,6 +21,7 @@ xiaobo.fp.form.detail.purge=Danger: Abandon Contents and Delete
 xiaobo.fp.form.action.teleport=Teleport Here
 xiaobo.fp.form.action.navigate=Navigate Here
 xiaobo.fp.form.action.lookat=Look at Me (Once)
+xiaobo.fp.form.action.lookat_coordinates=Look at Coordinates
 xiaobo.fp.form.action.lookat_continuous=Look at Me (Continuous)
 xiaobo.fp.form.action.jump=Jump
 xiaobo.fp.form.action.sneak=Start Sneaking

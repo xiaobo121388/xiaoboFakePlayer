@@ -21,6 +21,7 @@ xiaobo.fp.form.detail.purge=Vaara: Hylkää Sisältö ja Poista pysyvästi
 xiaobo.fp.form.action.teleport=Teleporttaa Tänne
 xiaobo.fp.form.action.navigate=Navigoi Tänne
 xiaobo.fp.form.action.lookat=Katso Minua (Kerran)
+xiaobo.fp.form.action.lookat_coordinates=Katso koordinaatteihin
 xiaobo.fp.form.action.lookat_continuous=Katso Minua (Jatkuva)
 xiaobo.fp.form.action.jump=Hyppää
 xiaobo.fp.form.action.sneak=Aloita Hiipuminen

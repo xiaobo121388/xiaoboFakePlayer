@@ -326,7 +326,7 @@ test("coordinate actions reject cross-dimension and unloaded targets before runt
     assert.equal(fixture.runtime.actions.length, 0);
 });
 
-test("one-shot look sets eye-to-eye rotation while continuous look keeps tracking the entity", () => {
+test("one-shot look preserves the eye target while continuous look keeps tracking the entity", () => {
     const fixture = createFixture();
     const operator = { playerId: "operator", isOperator: true };
 
@@ -340,7 +340,7 @@ test("one-shot look sets eye-to-eye rotation while continuous look keeps trackin
         targetId: "operator",
     }).ok, true);
     assert.deepEqual(fixture.runtime.actions, [
-        { kind: "look_at_once", rotation: { x: -45, y: -90 } },
+        { kind: "look_at_once", position: { x: 10, y: 75.62, z: 0 } },
         { kind: "look_at_entity", targetId: "operator" },
     ]);
 });

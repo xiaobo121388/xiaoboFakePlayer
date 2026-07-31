@@ -21,6 +21,7 @@ xiaobo.fp.form.detail.purge=Danger : abandonner le contenu et supprimer
 xiaobo.fp.form.action.teleport=Téléporter ici
 xiaobo.fp.form.action.navigate=Se diriger ici
 xiaobo.fp.form.action.lookat=Me regarder (une fois)
+xiaobo.fp.form.action.lookat_coordinates=Regarder des coordonnées
 xiaobo.fp.form.action.lookat_continuous=Me regarder (en continu)
 xiaobo.fp.form.action.jump=Sauter
 xiaobo.fp.form.action.sneak=Commencer à s'accroupir

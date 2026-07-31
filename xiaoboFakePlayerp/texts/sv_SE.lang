@@ -21,6 +21,7 @@ xiaobo.fp.form.detail.purge=Fara: Överge Innehåll och Ta bort
 xiaobo.fp.form.action.teleport=Teleportera Hit
 xiaobo.fp.form.action.navigate=Navigera Hit
 xiaobo.fp.form.action.lookat=Titta på Mig (En gång)
+xiaobo.fp.form.action.lookat_coordinates=Titta mot koordinater
 xiaobo.fp.form.action.lookat_continuous=Titta på Mig (Kontinuerlig)
 xiaobo.fp.form.action.jump=Hoppa
 xiaobo.fp.form.action.sneak=Börja Smyga

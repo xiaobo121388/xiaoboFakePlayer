@@ -149,9 +149,11 @@ export class SapiFakePlayerRuntime {
                             container?.swapItems(selection.slot, selectedSlot, container);
                     }
                     if (action.kind === "build_block") {
-                        const rotation = player.getRotation();
+                        const rotation = action.preserveView ? undefined : player.getRotation();
                         try {
-                            player.lookAtLocation(action.aim ?? blockFaceCenter(action.position, action.face), LookDuration.Instant);
+                            if (!action.preserveView) {
+                                player.lookAtLocation(blockFaceCenter(action.position, action.face), LookDuration.Instant);
+                            }
                             const target = player.dimension.getBlock(action.target);
                             if (target === undefined || !target.isAir) {
                                 accepted = false;
@@ -174,15 +176,14 @@ export class SapiFakePlayerRuntime {
                             }
                         }
                         finally {
-                            if (player.isValid)
+                            if (rotation !== undefined && player.isValid)
                                 player.setRotation(rotation);
                         }
                     }
                     else {
-                        if (action.aim === undefined)
+                        if (!action.preserveView) {
                             player.lookAtBlock(action.position, LookDuration.Instant);
-                        else
-                            player.lookAtLocation(action.aim, LookDuration.Instant);
+                        }
                         accepted = player.interact();
                     }
                 }

@@ -177,12 +177,14 @@ export class SapiFakePlayerRuntime implements FakePlayerRuntime {
                         else if (swapsItem) container?.swapItems(selection.slot, selectedSlot, container);
                     }
                     if (action.kind === "build_block") {
-                        const rotation = player.getRotation();
+                        const rotation = action.preserveView ? undefined : player.getRotation();
                         try {
-                            player.lookAtLocation(
-                                action.aim ?? blockFaceCenter(action.position, action.face),
-                                LookDuration.Instant,
-                            );
+                            if (!action.preserveView) {
+                                player.lookAtLocation(
+                                    blockFaceCenter(action.position, action.face),
+                                    LookDuration.Instant,
+                                );
+                            }
                             const target = player.dimension.getBlock(action.target);
                             if (target === undefined || !target.isAir) {
                                 accepted = false;
@@ -201,11 +203,12 @@ export class SapiFakePlayerRuntime implements FakePlayerRuntime {
                                 }
                             }
                         } finally {
-                            if (player.isValid) player.setRotation(rotation);
+                            if (rotation !== undefined && player.isValid) player.setRotation(rotation);
                         }
                     } else {
-                        if (action.aim === undefined) player.lookAtBlock(action.position, LookDuration.Instant);
-                        else player.lookAtLocation(action.aim, LookDuration.Instant);
+                        if (!action.preserveView) {
+                            player.lookAtBlock(action.position, LookDuration.Instant);
+                        }
                         accepted = player.interact();
                     }
                 } finally {

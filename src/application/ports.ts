@@ -83,7 +83,7 @@ export type RuntimeFakePlayerAction =
         readonly kind: "build_block";
         readonly position: Point;
         readonly face: BlockFace;
-        readonly aim?: Point;
+        readonly preserveView?: boolean;
         readonly target: Point;
         readonly selection: RuntimeBlockInteractionSelection;
     }
@@ -91,7 +91,7 @@ export type RuntimeFakePlayerAction =
         readonly kind: "interact_block";
         readonly position: Point;
         readonly face: BlockFace;
-        readonly aim?: Point;
+        readonly preserveView?: boolean;
         readonly selection?: RuntimeBlockInteractionSelection;
     }
     | { readonly kind: "interact_entity"; readonly targetId: string }

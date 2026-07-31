@@ -701,7 +701,7 @@ export class BehaviorService {
                     kind: "interact_block",
                     position: hit.position,
                     face: hit.face,
-                    aim: addPoints(hit.position, hit.faceLocation),
+                    preserveView: true,
                     selection: config.selectionMode === "slot"
                         ? { mode: "slot", slot: inventorySlot.slot }
                         : {
@@ -755,7 +755,7 @@ export class BehaviorService {
                     kind: "build_block",
                     position: hit.position,
                     face: hit.face,
-                    aim: addPoints(hit.position, hit.faceLocation),
+                    preserveView: true,
                     target,
                     selection: config.selectionMode === "slot"
                         ? { mode: "slot", slot: inventorySlot.slot }

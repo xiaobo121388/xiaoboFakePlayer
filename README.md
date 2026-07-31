@@ -1,4 +1,8 @@
-# 小波挂机假人
+# 小波假人 boFakeplayer
+
+<p align="center">
+	<img src="xiaoboFakePlayerbp/pack_icon.png" alt="小波假人 boFakeplayer" width="160">
+</p>
 
 <p align="center">
 	<strong>简体中文</strong> | <a href="README_EN.md">English</a>

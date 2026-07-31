@@ -8,6 +8,10 @@ function codePointLength(value) {
 function takeCodePoints(value, count) {
     return Array.from(value).slice(0, count).join("");
 }
+export function withMinecraftNamespace(value) {
+    const normalized = value.trim();
+    return normalized.length > 0 && !normalized.includes(":") ? `minecraft:${normalized}` : normalized;
+}
 export function reserveUniqueName(requested, unavailableNames) {
     const normalized = requested.trim();
     if (normalized.length === 0 || INVALID_NAME_CHARACTER.test(normalized)) {

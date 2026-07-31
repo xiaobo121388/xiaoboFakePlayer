@@ -5,6 +5,7 @@ import type { FakePlayerAction } from "../../application/behaviorService.js";
 import { isCapabilityEnabled } from "../../domain/capabilities.js";
 import type { FakePlayerGameMode, FakePlayerRecord, PermissionGrant, RespawnMode } from "../../domain/model.js";
 import { err, ok, type Result } from "../../domain/results.js";
+import { withMinecraftNamespace } from "../../domain/validation.js";
 import type { CommandServices } from "../commands.js";
 import { actorIdentity, isRealPlayer, playerLocation } from "../playerContext.js";
 import { openBehaviorForm } from "./behaviors.js";
@@ -280,18 +281,19 @@ async function openEntityTypeInteractionForm(
     if (response.canceled || !ready(player, services)) return;
     const typeId = response.formValues?.[0];
     if (typeof typeId !== "string") return sendError(player, "实体 ID 无效。");
+    const normalizedTypeId = withMinecraftNamespace(typeId);
     const current = loadCurrentRecord(player, services, record.id);
     if (!current.ok) return sendError(player, current.error.message);
     const targets = services.behavior.listInteractionTargets(
         actorIdentity(player),
         current.value.id,
         current.value.recordRevision,
-        typeId,
+        normalizedTypeId,
     );
     if (!targets.ok) return sendError(player, targets.error.message);
     const target = targets.value[0];
     if (target === undefined) {
-        player.sendMessage({ translate: "xiaobo.fp.message.interact_entity_not_found", with: [typeId.trim()] });
+        player.sendMessage({ translate: "xiaobo.fp.message.interact_entity_not_found", with: [normalizedTypeId] });
         return;
     }
     await performEntityInteraction(player, services, record.id, target.id);

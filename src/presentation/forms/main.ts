@@ -198,8 +198,13 @@ async function openActionForm(player: Player, services: CommandServices, record:
         }
         const form = new ActionFormData().title(t("xiaobo.fp.form.detail.actions"));
         entries.forEach(([label]) => form.button(label));
+        form.button(t("xiaobo.fp.form.action.interact_mob"));
         const response = await form.show(player);
         if (response.canceled || response.selection === undefined || !ready(player, services)) return;
+        if (response.selection === entries.length) {
+            await openMobInteractionForm(player, services, record);
+            return;
+        }
         const selected = entries[response.selection];
         if (selected === undefined) return;
         const current = loadCurrentRecord(player, services, record.id);
@@ -216,6 +221,98 @@ async function openActionForm(player: Player, services: CommandServices, record:
         if (!result.ok) return sendError(player, result.error.message);
         player.sendMessage({ translate: "xiaobo.fp.message.action_ok", with: [current.value.name] });
     });
+}
+
+async function openMobInteractionForm(
+    player: Player,
+    services: CommandServices,
+    record: FakePlayerRecord,
+): Promise<void> {
+    await formBoundary(player, `interact-mob:${record.id}`, async () => {
+        if (!ready(player, services)) return;
+        if (!isCapabilityEnabled("nearby_mob_listing")) {
+            await openMobTypeInteractionForm(player, services, record);
+            return;
+        }
+        const current = loadCurrentRecord(player, services, record.id);
+        if (!current.ok) return sendError(player, current.error.message);
+        const targets = services.behavior.listInteractionTargets(
+            actorIdentity(player),
+            current.value.id,
+            current.value.recordRevision,
+        );
+        if (!targets.ok) return sendError(player, targets.error.message);
+
+        const actions: (() => Promise<void>)[] = [];
+        const form = new ActionFormData()
+            .title(t("xiaobo.fp.form.action.interact_mob.title"))
+            .body(targets.value.length === 0
+                ? t("xiaobo.fp.form.action.interact_mob.empty")
+                : t("xiaobo.fp.form.action.interact_mob.body"));
+        targets.value.forEach((target) => {
+            form.button({
+                translate: "xiaobo.fp.form.action.interact_mob.target",
+                with: [target.nameTag || target.typeId, target.typeId, target.distance.toFixed(1)],
+            });
+            actions.push(() => performMobInteraction(player, services, record.id, target.id));
+        });
+        form.button(t("xiaobo.fp.form.action.interact_mob.by_id"));
+        actions.push(() => openMobTypeInteractionForm(player, services, record));
+        form.button(t("xiaobo.fp.form.back"));
+        actions.push(() => openActionForm(player, services, record));
+
+        const response = await form.show(player);
+        const action = response.selection === undefined ? undefined : actions[response.selection];
+        if (!response.canceled && action !== undefined && player.isValid && ready(player, services)) await action();
+    });
+}
+
+async function openMobTypeInteractionForm(
+    player: Player,
+    services: CommandServices,
+    record: FakePlayerRecord,
+): Promise<void> {
+    const response = await new ModalFormData()
+        .title(t("xiaobo.fp.form.action.interact_mob.by_id"))
+        .textField(t("xiaobo.fp.form.action.interact_mob.type_id"), "minecraft:cow")
+        .submitButton(t("xiaobo.fp.form.action.interact_mob.submit"))
+        .show(player);
+    if (response.canceled || !ready(player, services)) return;
+    const typeId = response.formValues?.[0];
+    if (typeof typeId !== "string") return sendError(player, "生物 ID 无效。");
+    const current = loadCurrentRecord(player, services, record.id);
+    if (!current.ok) return sendError(player, current.error.message);
+    const targets = services.behavior.listInteractionTargets(
+        actorIdentity(player),
+        current.value.id,
+        current.value.recordRevision,
+        typeId,
+    );
+    if (!targets.ok) return sendError(player, targets.error.message);
+    const target = targets.value[0];
+    if (target === undefined) {
+        player.sendMessage({ translate: "xiaobo.fp.message.interact_mob_not_found", with: [typeId.trim()] });
+        return;
+    }
+    await performMobInteraction(player, services, record.id, target.id);
+}
+
+async function performMobInteraction(
+    player: Player,
+    services: CommandServices,
+    id: FakePlayerRecord["id"],
+    targetId: string,
+): Promise<void> {
+    const current = loadCurrentRecord(player, services, id);
+    if (!current.ok) return sendError(player, current.error.message);
+    const result = services.behavior.perform(
+        actorIdentity(player),
+        current.value.id,
+        current.value.recordRevision,
+        { kind: "interact_entity", targetId },
+    );
+    if (!result.ok) return sendError(player, result.error.message);
+    player.sendMessage({ translate: "xiaobo.fp.message.action_ok", with: [current.value.name] });
 }
 
 async function openRenameForm(player: Player, services: CommandServices, record: FakePlayerRecord): Promise<void> {

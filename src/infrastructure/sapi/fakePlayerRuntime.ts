@@ -177,26 +177,31 @@ export class SapiFakePlayerRuntime implements FakePlayerRuntime {
                         else if (swapsItem) container?.swapItems(selection.slot, selectedSlot, container);
                     }
                     if (action.kind === "build_block") {
-                        player.lookAtLocation(
-                            action.aim ?? blockFaceCenter(action.position, action.face),
-                            LookDuration.Instant,
-                        );
-                        const target = player.dimension.getBlock(action.target);
-                        if (target === undefined || !target.isAir) {
-                            accepted = false;
-                        } else {
-                            player.stopBreakingBlock();
-                            const swapsBuildSlot = selectedSlot !== 0;
-                            if (swapsBuildSlot) container!.swapItems(selectedSlot, 0, container!);
-                            try {
-                                player.startBuild();
-                                player.stopBuild();
-                                accepted = true;
-                            } finally {
-                                if (swapsBuildSlot && player.isValid) {
-                                    container!.swapItems(selectedSlot, 0, container!);
+                        const rotation = player.getRotation();
+                        try {
+                            player.lookAtLocation(
+                                action.aim ?? blockFaceCenter(action.position, action.face),
+                                LookDuration.Instant,
+                            );
+                            const target = player.dimension.getBlock(action.target);
+                            if (target === undefined || !target.isAir) {
+                                accepted = false;
+                            } else {
+                                player.stopBreakingBlock();
+                                const swapsBuildSlot = selectedSlot !== 0;
+                                if (swapsBuildSlot) container!.swapItems(selectedSlot, 0, container!);
+                                try {
+                                    player.startBuild();
+                                    player.stopBuild();
+                                    accepted = true;
+                                } finally {
+                                    if (swapsBuildSlot && player.isValid) {
+                                        container!.swapItems(selectedSlot, 0, container!);
+                                    }
                                 }
                             }
+                        } finally {
+                            if (player.isValid) player.setRotation(rotation);
                         }
                     } else {
                         if (action.aim === undefined) player.lookAtBlock(action.position, LookDuration.Instant);

@@ -298,6 +298,38 @@ test("catalog codec migrates legacy records while validating schema five", () =>
         },
     });
     assert.equal(schemaFive?.records.fp0001?.keepSaturated, true);
+    const { projectileClaim: _legacyProjectileClaim, ...behaviorWithoutProjectileClaim } = createDefaultBehaviorConfig();
+    const schemaFiveWithoutProjectileClaim = catalogCodec.decode(5, {
+        nextId: 2,
+        records: {
+            fp0001: {
+                ...legacyRecord,
+                behavior: behaviorWithoutProjectileClaim,
+                skin: { kind: "default" },
+                keepSaturated: true,
+                inventoryFallbackRevision: null,
+            },
+        },
+    });
+    assert.deepEqual(
+        schemaFiveWithoutProjectileClaim?.records.fp0001?.behavior.projectileClaim,
+        { enabled: false, radius: 20 },
+    );
+    assert.equal(catalogCodec.decode(5, {
+        nextId: 2,
+        records: {
+            fp0001: {
+                ...legacyRecord,
+                behavior: {
+                    ...createDefaultBehaviorConfig(),
+                    projectileClaim: { enabled: true, radius: 0 },
+                },
+                skin: { kind: "default" },
+                keepSaturated: true,
+                inventoryFallbackRevision: null,
+            },
+        },
+    }), undefined);
     assert.equal(catalogCodec.decode(5, {
         nextId: 2,
         records: {

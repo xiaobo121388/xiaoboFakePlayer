@@ -1,4 +1,6 @@
 const MAX_INTERVAL_TICKS = 72_000;
+export const MAX_PROJECTILE_CLAIM_RADIUS = 128;
+export const PROJECTILE_CLAIM_INTERVAL_TICKS = 100;
 export const EXCLUSIVE_ACTION_BEHAVIORS = ["attack", "mine", "place", "use"];
 export function createDefaultBehaviorConfig() {
     return {
@@ -32,6 +34,7 @@ export function createDefaultBehaviorConfig() {
             intervalTicks: 20,
             slot: 0,
         },
+        projectileClaim: createDefaultProjectileClaimConfig(),
     };
 }
 export function decodeBehaviorConfig(payload) {
@@ -43,10 +46,13 @@ export function decodeBehaviorConfig(payload) {
     const mine = decodeMine(value.mine);
     const place = value.place === undefined ? createDefaultPlaceConfig() : decodePlace(value.place);
     const use = decodeUse(value.use);
+    const projectileClaim = value.projectileClaim === undefined
+        ? createDefaultProjectileClaimConfig()
+        : decodeProjectileClaim(value.projectileClaim);
     return follow === undefined || attack === undefined || mine === undefined
-        || place === undefined || use === undefined
+        || place === undefined || use === undefined || projectileClaim === undefined
         ? undefined
-        : { follow, attack, mine, place, use };
+        : { follow, attack, mine, place, use, projectileClaim };
 }
 export function normalizeExclusiveActionBehaviors(config, preferredKind) {
     const enabledKind = preferredKind !== undefined && config[preferredKind].enabled
@@ -183,6 +189,17 @@ function decodeUse(payload) {
             intervalTicks: value.intervalTicks,
             slot: value.slot,
         }
+        : undefined;
+}
+function createDefaultProjectileClaimConfig() {
+    return { enabled: false, radius: 20 };
+}
+function decodeProjectileClaim(payload) {
+    const value = asObject(payload);
+    return value !== undefined
+        && typeof value.enabled === "boolean"
+        && isNumberInRange(value.radius, 1, MAX_PROJECTILE_CLAIM_RADIUS)
+        ? { enabled: value.enabled, radius: value.radius }
         : undefined;
 }
 function asObject(value) {

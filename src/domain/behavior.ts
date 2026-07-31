@@ -1,6 +1,8 @@
 import type { BehaviorConfig } from "./model.js";
 
 const MAX_INTERVAL_TICKS = 72_000;
+export const MAX_PROJECTILE_CLAIM_RADIUS = 128;
+export const PROJECTILE_CLAIM_INTERVAL_TICKS = 100;
 export const EXCLUSIVE_ACTION_BEHAVIORS = ["attack", "mine", "place", "use"] as const;
 
 export type ExclusiveActionBehaviorKind = typeof EXCLUSIVE_ACTION_BEHAVIORS[number];
@@ -37,6 +39,7 @@ export function createDefaultBehaviorConfig(): BehaviorConfig {
             intervalTicks: 20,
             slot: 0,
         },
+        projectileClaim: createDefaultProjectileClaimConfig(),
     };
 }
 
@@ -48,10 +51,13 @@ export function decodeBehaviorConfig(payload: unknown): BehaviorConfig | undefin
     const mine = decodeMine(value.mine);
     const place = value.place === undefined ? createDefaultPlaceConfig() : decodePlace(value.place);
     const use = decodeUse(value.use);
+    const projectileClaim = value.projectileClaim === undefined
+        ? createDefaultProjectileClaimConfig()
+        : decodeProjectileClaim(value.projectileClaim);
     return follow === undefined || attack === undefined || mine === undefined
-        || place === undefined || use === undefined
+        || place === undefined || use === undefined || projectileClaim === undefined
         ? undefined
-        : { follow, attack, mine, place, use };
+        : { follow, attack, mine, place, use, projectileClaim };
 }
 
 export function normalizeExclusiveActionBehaviors(
@@ -200,6 +206,19 @@ function decodeUse(payload: unknown): BehaviorConfig["use"] | undefined {
             intervalTicks: value.intervalTicks,
             slot: value.slot,
         }
+        : undefined;
+}
+
+function createDefaultProjectileClaimConfig(): BehaviorConfig["projectileClaim"] {
+    return { enabled: false, radius: 20 };
+}
+
+function decodeProjectileClaim(payload: unknown): BehaviorConfig["projectileClaim"] | undefined {
+    const value = asObject(payload);
+    return value !== undefined
+        && typeof value.enabled === "boolean"
+        && isNumberInRange(value.radius, 1, MAX_PROJECTILE_CLAIM_RADIUS)
+        ? { enabled: value.enabled, radius: value.radius }
         : undefined;
 }
 

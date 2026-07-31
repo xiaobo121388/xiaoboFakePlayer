@@ -6,8 +6,8 @@ import { InventoryService, snapshotId } from "../src/application/inventoryServic
 import { OperationCoordinator } from "../src/application/operationCoordinator.js";
 import type {
     AttackTargetQuery,
+    BehaviorRuntime,
     EntityInteractionTargetQuery,
-    FakePlayerRuntime,
     InventoryAccess,
     InventorySnapshotStore,
     RuntimeActionReceipt,
@@ -40,9 +40,10 @@ class MemoryBackend implements StringPropertyBackend {
     }
 }
 
-class MemoryRuntime implements FakePlayerRuntime {
+class MemoryRuntime implements BehaviorRuntime {
     public readonly players = new Map<FakePlayerId, RuntimeFakePlayer>();
     public readonly actions: RuntimeFakePlayerAction[] = [];
+    public readonly projectileClaims: { readonly id: FakePlayerId; readonly radius: number }[] = [];
     public readonly inventorySlots = new Map<number, Omit<RuntimeInventorySlot, "slot">>();
 
     public capturePlayerSkin() {
@@ -66,6 +67,11 @@ class MemoryRuntime implements FakePlayerRuntime {
 
     public respawn(id: FakePlayerId, _location?: SavedLocation): boolean {
         return this.players.has(id);
+    }
+
+    public claimProjectiles(id: FakePlayerId, radius: number): number {
+        this.projectileClaims.push({ id, radius });
+        return 1;
     }
 
     public resolveInventorySlot(
@@ -607,6 +613,39 @@ test("behavior configuration tolerates checkpoint-only revision advances", () =>
         assert.equal(updated.value.recordRevision, 6);
         assert.deepEqual(updated.value.behavior, config);
     }
+});
+
+test("projectile claim behavior scans every five seconds without consuming the action slot", () => {
+    const fixture = createFixture();
+    const operator = { playerId: "operator", isOperator: true };
+    const defaults = createDefaultBehaviorConfig();
+    const config = {
+        ...defaults,
+        use: { enabled: true, intervalTicks: 1, slot: 0 },
+        projectileClaim: { enabled: true, radius: 24 },
+    };
+    assert.equal(fixture.service.updateBehaviorConfig(
+        operator,
+        fixture.record.id,
+        fixture.record.recordRevision,
+        fixture.record.behavior,
+        config,
+    ).ok, true);
+    fixture.runtime.actions.length = 0;
+
+    const first = fixture.service.tick(0);
+    assert.equal(first.ok, true);
+    if (first.ok) assert.equal(first.value.attemptedActions, 1);
+    assert.deepEqual(fixture.runtime.projectileClaims, [{ id: fixture.record.id, radius: 24 }]);
+    assert.deepEqual(fixture.runtime.actions, [{ kind: "use_item", slot: 0 }]);
+
+    assert.equal(fixture.service.tick(99).ok, true);
+    assert.equal(fixture.runtime.projectileClaims.length, 1);
+    assert.equal(fixture.service.tick(100).ok, true);
+    assert.deepEqual(fixture.runtime.projectileClaims, [
+        { id: fixture.record.id, radius: 24 },
+        { id: fixture.record.id, radius: 24 },
+    ]);
 });
 
 test("one-shot navigation pauses automatic pathfinding until the destination is reached", () => {

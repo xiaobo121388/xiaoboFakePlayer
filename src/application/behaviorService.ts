@@ -3,6 +3,7 @@ import {
     decodeBehaviorConfig,
     EXCLUSIVE_ACTION_BEHAVIORS,
     normalizeExclusiveActionBehaviors,
+    PROJECTILE_CLAIM_INTERVAL_TICKS,
 } from "../domain/behavior.js";
 import type {
     BehaviorConfig,
@@ -18,8 +19,8 @@ import { err, ok, type Result } from "../domain/results.js";
 import { InventoryService } from "./inventoryService.js";
 import { OperationCoordinator } from "./operationCoordinator.js";
 import type {
+    BehaviorRuntime,
     BlockFace,
-    FakePlayerRuntime,
     RuntimeActionReceipt,
     RuntimeBlockInfo,
     RuntimeEntityInteractionTarget,
@@ -152,6 +153,7 @@ export interface EntityInteractionTarget {
 
 export class BehaviorService {
     private readonly nextDueTicks = new Map<string, number>();
+    private readonly nextProjectileClaimTicks = new Map<FakePlayerId, number>();
     private readonly following = new Set<FakePlayerId>();
     private readonly mineScans = new Map<FakePlayerId, MineScanState>();
     private readonly mineTargets = new Map<FakePlayerId, CachedMineTarget>();
@@ -161,7 +163,7 @@ export class BehaviorService {
 
     public constructor(
         private readonly stateStore: WorldStateStore,
-        private readonly runtime: FakePlayerRuntime,
+        private readonly runtime: BehaviorRuntime,
         private readonly worldQueries: WorldQueries,
         private readonly coordinator: OperationCoordinator,
         private readonly inventory: InventoryService,
@@ -340,10 +342,12 @@ export class BehaviorService {
             ))
             .sort((left, right) => left.id.localeCompare(right.id));
         const activeIds = new Set(records.map((record) => record.id));
+        this.removeInactiveProjectileClaimState(records);
         for (const id of this.oneShotNavigations.keys()) {
             if (!activeIds.has(id)) this.oneShotNavigations.delete(id);
         }
         for (const record of records) this.refreshOneShotNavigation(record.id);
+        this.runProjectileClaimScans(records, pendingIds, currentTick);
         const tasks = records
             .filter((record) => !pendingIds.has(record.id))
             .flatMap((record) => AUTOMATIC_BEHAVIORS
@@ -421,6 +425,26 @@ export class BehaviorService {
             case "mine": return this.runMine(record, blockBudget);
             case "place": return this.runPlace(record, blockBudget);
             case "use": return this.runUse(record);
+        }
+    }
+
+    private runProjectileClaimScans(
+        records: readonly FakePlayerRecord[],
+        pendingIds: ReadonlySet<FakePlayerId>,
+        currentTick: number,
+    ): void {
+        for (const record of records) {
+            if (!record.behavior.projectileClaim.enabled
+                || pendingIds.has(record.id)
+                || (this.nextProjectileClaimTicks.get(record.id) ?? 0) > currentTick) continue;
+            const lease = this.coordinator.tryAcquire([`fake:${record.id}`]);
+            if (!lease.ok) continue;
+            try {
+                this.runtime.claimProjectiles(record.id, record.behavior.projectileClaim.radius);
+                this.nextProjectileClaimTicks.set(record.id, currentTick + PROJECTILE_CLAIM_INTERVAL_TICKS);
+            } finally {
+                lease.value.release();
+            }
         }
     }
 
@@ -1004,6 +1028,16 @@ export class BehaviorService {
         this.mineTargets.delete(id);
         this.activeMineTargets.delete(id);
         this.oneShotNavigations.delete(id);
+        this.nextProjectileClaimTicks.delete(id);
+    }
+
+    private removeInactiveProjectileClaimState(records: readonly FakePlayerRecord[]): void {
+        const activeIds = new Set(records
+            .filter((record) => record.behavior.projectileClaim.enabled)
+            .map((record) => record.id));
+        for (const id of this.nextProjectileClaimTicks.keys()) {
+            if (!activeIds.has(id)) this.nextProjectileClaimTicks.delete(id);
+        }
     }
 
     private removeInactiveRuntimeState(tasks: readonly BehaviorTask[]): void {

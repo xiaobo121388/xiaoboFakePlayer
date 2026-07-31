@@ -138,6 +138,10 @@ export interface FakePlayerRuntime {
     listTagged(): readonly RuntimeFakePlayer[];
 }
 
+export interface BehaviorRuntime extends FakePlayerRuntime {
+    claimProjectiles(id: FakePlayerId, radius: number): number;
+}
+
 export interface InventorySnapshotStore {
     save(fakePlayerId: FakePlayerId, revision: number): Result<string>;
     restore(fakePlayerId: FakePlayerId, structureId: string): Result<void>;

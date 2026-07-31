@@ -52,3 +52,22 @@ test("behavior change message distinguishes setting updates and no-op saves", ()
     });
     assert.equal(behaviorChangeMessage("Alex", previous, previous), undefined);
 });
+
+test("behavior change message reports projectile claim changes", () => {
+    const previous = createDefaultBehaviorConfig();
+    const current = {
+        ...previous,
+        projectileClaim: { enabled: true, radius: 24 },
+    };
+
+    assert.deepEqual(behaviorChangeMessage("Alex", previous, current), {
+        rawtext: [
+            { translate: "xiaobo.fp.message.behavior_changed", with: ["Alex"] },
+            { text: "\n- " },
+            {
+                translate: "xiaobo.fp.message.behavior_enabled",
+                with: { rawtext: [{ translate: "xiaobo.fp.form.behavior.projectile_claim" }] },
+            },
+        ],
+    });
+});

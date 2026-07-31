@@ -108,6 +108,10 @@ export interface BehaviorConfig {
         readonly intervalTicks: number;
         readonly slot: number;
     };
+    readonly projectileClaim: {
+        readonly enabled: boolean;
+        readonly radius: number;
+    };
 }
 
 export interface LifecycleOperation {

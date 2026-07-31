@@ -13,6 +13,11 @@ function takeCodePoints(value: string, count: number): string {
     return Array.from(value).slice(0, count).join("");
 }
 
+export function withMinecraftNamespace(value: string): string {
+    const normalized = value.trim();
+    return normalized.length > 0 && !normalized.includes(":") ? `minecraft:${normalized}` : normalized;
+}
+
 export function reserveUniqueName(requested: string, unavailableNames: Iterable<string>): Result<string> {
     const normalized = requested.trim();
     if (normalized.length === 0 || INVALID_NAME_CHARACTER.test(normalized)) {

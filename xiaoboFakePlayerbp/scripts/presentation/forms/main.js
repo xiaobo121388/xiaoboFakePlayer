@@ -2,6 +2,7 @@ import { world } from "@minecraft/server";
 import { ActionFormData, MessageFormData, ModalFormData } from "@minecraft/server-ui";
 import { isCapabilityEnabled } from "../../domain/capabilities.js";
 import { err, ok } from "../../domain/results.js";
+import { withMinecraftNamespace } from "../../domain/validation.js";
 import { actorIdentity, isRealPlayer, playerLocation } from "../playerContext.js";
 import { openBehaviorForm } from "./behaviors.js";
 import { formBoundary, ready, sendError, t } from "./formSupport.js";
@@ -245,15 +246,16 @@ async function openMobTypeInteractionForm(player, services, record) {
     const typeId = response.formValues?.[0];
     if (typeof typeId !== "string")
         return sendError(player, "生物 ID 无效。");
+    const normalizedTypeId = withMinecraftNamespace(typeId);
     const current = loadCurrentRecord(player, services, record.id);
     if (!current.ok)
         return sendError(player, current.error.message);
-    const targets = services.behavior.listInteractionTargets(actorIdentity(player), current.value.id, current.value.recordRevision, typeId);
+    const targets = services.behavior.listInteractionTargets(actorIdentity(player), current.value.id, current.value.recordRevision, normalizedTypeId);
     if (!targets.ok)
         return sendError(player, targets.error.message);
     const target = targets.value[0];
     if (target === undefined) {
-        player.sendMessage({ translate: "xiaobo.fp.message.interact_mob_not_found", with: [typeId.trim()] });
+        player.sendMessage({ translate: "xiaobo.fp.message.interact_mob_not_found", with: [normalizedTypeId] });
         return;
     }
     await performMobInteraction(player, services, record.id, target.id);

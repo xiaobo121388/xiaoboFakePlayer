@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { formatFakePlayerId, reserveUniqueName } from "../src/domain/validation.js";
+import { formatFakePlayerId, reserveUniqueName, withMinecraftNamespace } from "../src/domain/validation.js";
+
+test("withMinecraftNamespace defaults unqualified IDs and preserves explicit namespaces", () => {
+    assert.equal(withMinecraftNamespace(" stone "), "minecraft:stone");
+    assert.equal(withMinecraftNamespace("custom:stone"), "custom:stone");
+    assert.equal(withMinecraftNamespace("  "), "");
+});
 
 test("reserveUniqueName trims and appends the smallest available suffix", () => {
     assert.deepEqual(reserveUniqueName("  Alice  ", []), { ok: true, value: "Alice" });

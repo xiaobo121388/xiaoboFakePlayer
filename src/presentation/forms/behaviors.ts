@@ -3,6 +3,7 @@ import { ActionFormData, ModalFormData } from "@minecraft/server-ui";
 
 import { HOTBAR_SLOT_COUNT } from "../../domain/inventory.js";
 import type { BehaviorConfig, FakePlayerRecord, Point } from "../../domain/model.js";
+import { withMinecraftNamespace } from "../../domain/validation.js";
 import type { CommandServices } from "../commands.js";
 import { actorIdentity, isRealPlayer } from "../playerContext.js";
 import { behaviorChangeMessage } from "./behaviorChangeMessage.js";
@@ -132,7 +133,7 @@ async function openAttackForm(
             intervalTicks: Number(intervalTicks),
             maxDistance,
             targetFamilies: parseIdList(families),
-            targetTypeIds: parseIdList(typeIds),
+            targetTypeIds: [...new Set(parseIdList(typeIds).map(withMinecraftNamespace))],
             chase,
         },
     }, openDetail);
@@ -175,7 +176,7 @@ async function openMineForm(
             enabled,
             intervalTicks: Number(intervalTicks),
             direction,
-            blockTypeId: blockTypeId.trim() || null,
+            blockTypeId: withMinecraftNamespace(blockTypeId) || null,
             searchRadius,
             approach,
         },
@@ -302,7 +303,7 @@ async function openPlaceSettingsForm(
             if (!mainhandItemTypeId.ok) return sendError(player, mainhandItemTypeId.error.message);
             itemTypeId = mainhandItemTypeId.value;
         } else {
-            itemTypeId = selection.trim() || null;
+            itemTypeId = withMinecraftNamespace(selection) || null;
         }
     }
     await saveBehavior(player, services, record, {

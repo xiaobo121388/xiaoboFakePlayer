@@ -18,10 +18,11 @@ const PERSONA_PIECE_TYPES = new Set([
     "Outerwear", "RightArm", "RightLeg", "Skeleton", "Skin", "Top",
 ]);
 export const catalogCodec = {
-    schemaVersion: 4,
+    schemaVersion: 5,
     initialValue: { nextId: 1, records: {} },
     decode(schemaVersion, payload) {
-        if (schemaVersion !== 1 && schemaVersion !== 2 && schemaVersion !== 3 && schemaVersion !== 4) {
+        if (schemaVersion !== 1 && schemaVersion !== 2 && schemaVersion !== 3
+            && schemaVersion !== 4 && schemaVersion !== 5) {
             return undefined;
         }
         const value = asObject(payload);
@@ -74,6 +75,13 @@ export const operationsCodec = {
 };
 function decodeFakePlayerRecord(payload, schemaVersion) {
     const value = asObject(payload);
+    const keepSaturated = value === undefined
+        ? undefined
+        : schemaVersion < 5 && value.keepSaturated === undefined
+            ? false
+            : typeof value.keepSaturated === "boolean"
+                ? value.keepSaturated
+                : undefined;
     if (value === undefined
         || !isString(value.id)
         || !isString(value.name)
@@ -81,6 +89,7 @@ function decodeFakePlayerRecord(payload, schemaVersion) {
         || !isNonNegativeInteger(value.recordRevision)
         || typeof value.expectedOnline !== "boolean"
         || !isGameMode(value.gameMode)
+        || keepSaturated === undefined
         || !isIntegerInRange(value.selectedSlot, 0, 8)
         || !isNonNegativeInteger(value.totalExperience)
         || !isRespawnMode(value.respawnMode)
@@ -126,6 +135,7 @@ function decodeFakePlayerRecord(payload, schemaVersion) {
         expectedOnline: value.expectedOnline,
         location,
         gameMode: value.gameMode,
+        keepSaturated,
         skin,
         selectedSlot: value.selectedSlot,
         totalExperience: value.totalExperience,

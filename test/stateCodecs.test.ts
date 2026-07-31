@@ -29,7 +29,7 @@ test("aggregate codecs provide valid schema-one initial values", () => {
 });
 
 test("aggregate codecs reject malformed and unknown-schema payloads", () => {
-    assert.equal(catalogCodec.decode(5, catalogCodec.initialValue), undefined);
+    assert.equal(catalogCodec.decode(6, catalogCodec.initialValue), undefined);
     assert.equal(catalogCodec.decode(1, { nextId: 0, records: {} }), undefined);
     assert.equal(permissionCodec.decode(1, {
         grants: { stable: { playerId: "different", lastKnownName: "Alex", canPlace: true, canSet: false } },
@@ -124,7 +124,7 @@ test("world state aggregates commit with independent revisions", () => {
     assert.equal(operations.ok && operations.state.revision, 0);
 });
 
-test("catalog codec migrates legacy records while validating schema four", () => {
+test("catalog codec migrates legacy records while validating schema five", () => {
     const legacyRecord = {
         id: "fp0001",
         name: "Alex",
@@ -148,6 +148,7 @@ test("catalog codec migrates legacy records while validating schema four", () =>
     const migrated = catalogCodec.decode(1, { nextId: 2, records: { fp0001: legacyRecord } });
     assert.deepEqual(migrated?.records.fp0001?.behavior, createDefaultBehaviorConfig());
     assert.deepEqual(migrated?.records.fp0001?.skin, { kind: "default" });
+    assert.equal(migrated?.records.fp0001?.keepSaturated, false);
     assert.equal(catalogCodec.decode(2, { nextId: 2, records: { fp0001: legacyRecord } }), undefined);
     const schemaTwo = catalogCodec.decode(2, {
         nextId: 2,
@@ -283,6 +284,31 @@ test("catalog codec migrates legacy records while validating schema four", () =>
         },
     });
     assert.equal(schemaFour?.records.fp0001?.inventoryFallbackRevision, null);
+    assert.equal(schemaFour?.records.fp0001?.keepSaturated, false);
+    const schemaFive = catalogCodec.decode(5, {
+        nextId: 2,
+        records: {
+            fp0001: {
+                ...legacyRecord,
+                behavior: createDefaultBehaviorConfig(),
+                skin: { kind: "default" },
+                keepSaturated: true,
+                inventoryFallbackRevision: null,
+            },
+        },
+    });
+    assert.equal(schemaFive?.records.fp0001?.keepSaturated, true);
+    assert.equal(catalogCodec.decode(5, {
+        nextId: 2,
+        records: {
+            fp0001: {
+                ...legacyRecord,
+                behavior: createDefaultBehaviorConfig(),
+                skin: { kind: "default" },
+                inventoryFallbackRevision: null,
+            },
+        },
+    }), undefined);
     assert.equal(catalogCodec.decode(4, {
         nextId: 2,
         records: {

@@ -49,6 +49,9 @@ class MemoryBackend implements StringPropertyBackend {
 
 class MemoryRuntime implements FakePlayerRuntime {
     public readonly players = new Map<FakePlayerId, RuntimeFakePlayer>();
+    public readonly actions: RuntimeFakePlayerAction[] = [];
+    public readonly rejectedActions = new Set<RuntimeFakePlayerAction["kind"]>();
+    public readonly saturated = new Set<FakePlayerId>();
     public failSpawn = false;
     public failDisconnect = false;
     public spawnCount = 0;
@@ -62,6 +65,7 @@ class MemoryRuntime implements FakePlayerRuntime {
     public spawn(request: SpawnFakePlayerRequest): RuntimeFakePlayer {
         if (this.failSpawn) throw new Error("injected spawn failure");
         this.spawnRequests.push(request);
+        if (request.keepSaturated) this.saturated.add(request.id);
         const player: RuntimeFakePlayer = {
             id: request.id,
             name: request.name,
@@ -104,7 +108,19 @@ class MemoryRuntime implements FakePlayerRuntime {
         return undefined;
     }
 
-    public perform(_id: FakePlayerId, _action: RuntimeFakePlayerAction): RuntimeActionReceipt {
+    public perform(id: FakePlayerId, action: RuntimeFakePlayerAction): RuntimeActionReceipt {
+        this.actions.push(action);
+        if (this.rejectedActions.has(action.kind)) return { accepted: false };
+        if (action.kind === "set_game_mode") {
+            const player = this.players.get(id);
+            if (player === undefined) return { accepted: false };
+            this.players.set(id, { ...player, gameMode: action.gameMode });
+        }
+        if (action.kind === "set_saturation") {
+            if (!this.players.has(id)) return { accepted: false };
+            if (action.enabled) this.saturated.add(id);
+            else this.saturated.delete(id);
+        }
         return { accepted: true };
     }
 
@@ -866,6 +882,138 @@ test("health polling auto-respawns one dead player and ignores a delayed duplica
     const duplicate = fixture.service.autoRespawn(configured.value.id);
     assert.deepEqual(duplicate, { ok: true, value: undefined });
     assert.equal(fixture.snapshots.saveCount, savesAfterPoll);
+});
+
+test("other settings apply online game mode and saturation then persist all rules", () => {
+    const fixture = createFixture();
+    const created = fixture.service.create(operator, createRequest);
+    assert.equal(created.ok, true);
+    if (!created.ok) return;
+    const manualRespawnLocation = {
+        dimension: "minecraft:nether",
+        position: { x: 4, y: 70, z: 5 },
+        rotation: { x: 0, y: 90 },
+    };
+
+    const configured = fixture.service.setOtherSettings(
+        operator,
+        created.value.id,
+        created.value.recordRevision,
+        {
+            gameMode: "creative",
+            keepSaturated: true,
+            respawnMode: "manual",
+            manualRespawnLocation,
+        },
+    );
+
+    assert.equal(configured.ok, true);
+    if (!configured.ok) return;
+    assert.equal(configured.value.gameMode, "creative");
+    assert.equal(configured.value.keepSaturated, true);
+    assert.equal(configured.value.respawnMode, "manual");
+    assert.deepEqual(configured.value.respawnLocation, manualRespawnLocation);
+    assert.equal(fixture.runtime.players.get(created.value.id)?.gameMode, "creative");
+    assert.equal(fixture.runtime.saturated.has(created.value.id), true);
+    assert.deepEqual(fixture.runtime.actions, [
+        { kind: "set_saturation", enabled: true },
+        { kind: "set_game_mode", gameMode: "creative" },
+    ]);
+
+    const runtime = fixture.runtime.players.get(created.value.id);
+    assert.notEqual(runtime, undefined);
+    if (runtime === undefined) return;
+    fixture.runtime.players.set(created.value.id, { ...runtime, alive: false });
+    fixture.runtime.actions.length = 0;
+    const respawned = fixture.service.respawn(
+        operator,
+        configured.value.id,
+        configured.value.recordRevision,
+    );
+    assert.equal(respawned.ok, true);
+    if (!respawned.ok) return;
+    assert.deepEqual(fixture.runtime.actions, [{ kind: "set_saturation", enabled: true }]);
+
+    fixture.runtime.actions.length = 0;
+    assert.deepEqual(fixture.service.refreshSaturation(), ok(1));
+    assert.deepEqual(fixture.runtime.actions, [{ kind: "set_saturation", enabled: true }]);
+
+    fixture.runtime.actions.length = 0;
+    const lease = fixture.coordinator.tryAcquire([`fake:${created.value.id}`]);
+    assert.equal(lease.ok, true);
+    if (!lease.ok) return;
+    try {
+        assert.deepEqual(fixture.service.refreshSaturation(), ok(0));
+        assert.deepEqual(fixture.runtime.actions, []);
+    } finally {
+        lease.value.release();
+    }
+});
+
+test("other settings persist offline without requiring a runtime instance", () => {
+    const fixture = createFixture();
+    const created = fixture.service.create(operator, createRequest);
+    assert.equal(created.ok, true);
+    if (!created.ok) return;
+    const offline = fixture.service.takeOffline(operator, created.value.id, created.value.recordRevision);
+    assert.equal(offline.ok, true);
+    if (!offline.ok) return;
+    fixture.runtime.actions.length = 0;
+
+    const configured = fixture.service.setOtherSettings(
+        operator,
+        offline.value.id,
+        offline.value.recordRevision,
+        { gameMode: "adventure", keepSaturated: true, respawnMode: "death_location" },
+    );
+
+    assert.equal(configured.ok, true);
+    if (!configured.ok) return;
+    assert.equal(configured.value.gameMode, "adventure");
+    assert.equal(configured.value.keepSaturated, true);
+    assert.equal(configured.value.respawnMode, "death_location");
+    assert.deepEqual(fixture.runtime.actions, []);
+    assert.deepEqual(fixture.service.refreshSaturation(), ok(0));
+
+    const online = fixture.service.bringOnline(
+        operator,
+        configured.value.id,
+        configured.value.recordRevision,
+    );
+    assert.equal(online.ok, true);
+    assert.equal(fixture.runtime.spawnRequests.at(-1)?.keepSaturated, true);
+    assert.equal(fixture.runtime.saturated.has(configured.value.id), true);
+    assert.deepEqual(fixture.runtime.actions, []);
+});
+
+test("other settings roll back saturation when online game mode is rejected", () => {
+    const fixture = createFixture();
+    const created = fixture.service.create(operator, createRequest);
+    assert.equal(created.ok, true);
+    if (!created.ok) return;
+    fixture.runtime.rejectedActions.add("set_game_mode");
+
+    const configured = fixture.service.setOtherSettings(
+        operator,
+        created.value.id,
+        created.value.recordRevision,
+        { gameMode: "creative", keepSaturated: true, respawnMode: "death_location" },
+    );
+
+    assert.equal(configured.ok, false);
+    if (!configured.ok) assert.equal(configured.error.code, "CONFLICT");
+    assert.equal(fixture.runtime.saturated.has(created.value.id), false);
+    assert.equal(fixture.runtime.players.get(created.value.id)?.gameMode, "survival");
+    assert.deepEqual(fixture.runtime.actions, [
+        { kind: "set_saturation", enabled: true },
+        { kind: "set_game_mode", gameMode: "creative" },
+        { kind: "set_saturation", enabled: false },
+    ]);
+    const loaded = fixture.state.loadCatalog();
+    assert.equal(loaded.ok, true);
+    if (!loaded.ok) return;
+    assert.equal(loaded.state.value.records[created.value.id]?.recordRevision, created.value.recordRevision);
+    assert.equal(loaded.state.value.records[created.value.id]?.keepSaturated, false);
 });
 
 test("recovery finishes an online rename once", () => {

@@ -40,6 +40,12 @@ export const CAPABILITY_MATRIX: CapabilityMatrix = {
             detail: "空手与假人实体交互可直接打开该假人的设置界面。",
         },
         {
+            id: "nearby_mob_interaction",
+            availability: "enabled",
+            verification: "bedrock_26_33_required",
+            detail: "即时动作可列出假人周围 10 格内的生物，或按实体类型 ID 选择最近目标并交互。",
+        },
+        {
             id: "structure_inventory_snapshot",
             availability: "enabled",
             verification: "bedrock_26_33_required",
@@ -68,6 +74,12 @@ export const CAPABILITY_MATRIX: CapabilityMatrix = {
             availability: "hidden_pending_game_validation",
             verification: "bedrock_26_33_required",
             detail: "公开组件存在，但写入语义尚未通过正式版 1.26.33 实机验证。",
+        },
+        {
+            id: "persistent_saturation_effect",
+            availability: "enabled",
+            verification: "bedrock_26_33_required",
+            detail: "通过公开状态效果 API 每 5 秒续加饱和效果，并在关闭时立即移除。",
         },
         {
             id: "automatic_fishing",

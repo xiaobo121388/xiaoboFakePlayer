@@ -65,6 +65,7 @@ export class LifecycleService {
                 position: provisioning.location.position,
                 rotation: provisioning.location.rotation,
                 gameMode: provisioning.gameMode,
+                keepSaturated: provisioning.keepSaturated,
                 skin: provisioning.skin,
                 selectedSlot: provisioning.selectedSlot,
                 totalExperience: provisioning.totalExperience,
@@ -180,6 +181,7 @@ export class LifecycleService {
                 position: pending.value.location.position,
                 rotation: pending.value.location.rotation,
                 gameMode: pending.value.gameMode,
+                keepSaturated: pending.value.keepSaturated,
                 skin: pending.value.skin,
                 selectedSlot: pending.value.selectedSlot,
                 totalExperience: pending.value.totalExperience,
@@ -388,6 +390,141 @@ export class LifecycleService {
             lease.value.release();
         }
     }
+    setOtherSettings(actor, id, expectedRecordRevision, request) {
+        const authorization = this.authorize(actor, "manage");
+        if (!authorization.ok)
+            return authorization;
+        const available = this.inventory.ensureNoPendingTransfer(id);
+        if (!available.ok)
+            return available;
+        const context = this.loadRecord(id, expectedRecordRevision);
+        if (!context.ok)
+            return context;
+        if (context.value.record.lifecycle.kind !== "online" && context.value.record.lifecycle.kind !== "offline") {
+            return err("INVALID_STATE", `假人 ${id} 当前处于 ${context.value.record.lifecycle.kind}，不能修改其他功能。`);
+        }
+        if (request.respawnMode === "manual" && request.manualRespawnLocation === undefined) {
+            return err("INVALID_STATE", "手动复活规则必须提供复活位置。");
+        }
+        const lease = this.coordinator.tryAcquire([`fake:${id}`]);
+        if (!lease.ok)
+            return lease;
+        let gameModeChanged = false;
+        let saturationChanged = false;
+        const rollbackRuntime = () => {
+            const failures = [];
+            if (gameModeChanged) {
+                try {
+                    if (!this.runtime.perform(id, {
+                        kind: "set_game_mode",
+                        gameMode: context.value.record.gameMode,
+                    }).accepted)
+                        failures.push("游戏模式");
+                }
+                catch (cause) {
+                    failures.push(`游戏模式（${cause instanceof Error ? cause.message : String(cause)}）`);
+                }
+            }
+            if (saturationChanged) {
+                try {
+                    if (!this.runtime.perform(id, {
+                        kind: "set_saturation",
+                        enabled: context.value.record.keepSaturated,
+                    }).accepted)
+                        failures.push("持续饱和");
+                }
+                catch (cause) {
+                    failures.push(`持续饱和（${cause instanceof Error ? cause.message : String(cause)}）`);
+                }
+            }
+            return failures;
+        };
+        try {
+            if (context.value.record.lifecycle.kind === "online") {
+                if (request.keepSaturated !== context.value.record.keepSaturated) {
+                    const saturation = this.runtime.perform(id, {
+                        kind: "set_saturation",
+                        enabled: request.keepSaturated,
+                    });
+                    if (!saturation.accepted)
+                        return err("CONFLICT", `无法更新假人 ${id} 的持续饱和状态。`);
+                    saturationChanged = true;
+                }
+                if (request.gameMode !== context.value.record.gameMode) {
+                    const gameMode = this.runtime.perform(id, {
+                        kind: "set_game_mode",
+                        gameMode: request.gameMode,
+                    });
+                    if (!gameMode.accepted) {
+                        const rollbackFailures = rollbackRuntime();
+                        return err("CONFLICT", `无法更新假人 ${id} 的游戏模式。`
+                            + (rollbackFailures.length === 0
+                                ? ""
+                                : `；且无法回滚${rollbackFailures.join("、")}。`));
+                    }
+                    gameModeChanged = true;
+                }
+            }
+            const next = {
+                ...context.value.record,
+                recordRevision: context.value.record.recordRevision + 1,
+                gameMode: request.gameMode,
+                keepSaturated: request.keepSaturated,
+                respawnMode: request.respawnMode,
+                respawnLocation: request.manualRespawnLocation ?? context.value.record.respawnLocation,
+            };
+            const committed = commitCatalogRecord(this.stateStore, context.value.catalogRevision, context.value.catalog, next);
+            if (committed.ok)
+                return ok(committed.value.record);
+            const rollbackFailures = rollbackRuntime();
+            return rollbackFailures.length === 0
+                ? committed
+                : err("CONFLICT", `${committed.error.message}；且无法回滚${rollbackFailures.join("、")}。`);
+        }
+        catch (cause) {
+            const rollbackFailures = rollbackRuntime();
+            const message = cause instanceof Error ? cause.message : String(cause);
+            throw new Error(`other settings ${id}: ${message}`
+                + (rollbackFailures.length === 0 ? "" : `；无法回滚${rollbackFailures.join("、")}。`), { cause });
+        }
+        finally {
+            lease.value.release();
+        }
+    }
+    refreshSaturation() {
+        const loaded = this.stateStore.loadCatalog();
+        if (!loaded.ok)
+            return err("CONFLICT", loaded.diagnostics.join("; "));
+        const rejected = [];
+        let refreshed = 0;
+        for (const record of Object.values(loaded.state.value.records)) {
+            if (record.lifecycle.kind !== "online" || !record.keepSaturated)
+                continue;
+            const lease = this.coordinator.tryAcquire([`fake:${record.id}`]);
+            if (!lease.ok)
+                continue;
+            try {
+                const runtime = this.runtime.get(record.id);
+                if (runtime === undefined) {
+                    rejected.push(record.id);
+                    continue;
+                }
+                if (!runtime.alive)
+                    continue;
+                const receipt = this.runtime.perform(record.id, { kind: "set_saturation", enabled: true });
+                if (receipt.accepted)
+                    refreshed += 1;
+                else
+                    rejected.push(record.id);
+            }
+            finally {
+                lease.value.release();
+            }
+        }
+        return rejected.length === 0
+            ? ok(refreshed)
+            : err("INVALID_STATE", `以下在线假人无法刷新持续饱和：${rejected.join(", ")}。`);
+    }
     finishRenaming(context) {
         const operation = lifecycleOperation(context.record);
         if (context.record.lifecycle.kind !== "renaming" || operation?.targetName === undefined) {
@@ -539,6 +676,10 @@ export class LifecycleService {
         if (runtimeState === undefined || !runtimeState.alive) {
             return err("INVALID_STATE", `${current.record.id} 复活后仍没有存活实例。`);
         }
+        if (current.record.keepSaturated
+            && !this.runtime.perform(current.record.id, { kind: "set_saturation", enabled: true }).accepted) {
+            return err("CONFLICT", `无法为复活后的假人 ${current.record.id} 启用持续饱和。`);
+        }
         const online = transitionLifecycle(current.record, current.record.recordRevision, { kind: "online" });
         if (!online.ok)
             return online;
@@ -594,6 +735,7 @@ function createProvisioningRecord(id, name, ownerId, request, skin, operation) {
         expectedOnline: true,
         location: request.location,
         gameMode: request.gameMode,
+        keepSaturated: false,
         skin,
         selectedSlot: 0,
         totalExperience: 0,
@@ -677,6 +819,7 @@ function spawnRequest(record) {
         position: record.location.position,
         rotation: record.location.rotation,
         gameMode: record.gameMode,
+        keepSaturated: record.keepSaturated,
         skin: record.skin,
         selectedSlot: record.selectedSlot,
         totalExperience: record.totalExperience,

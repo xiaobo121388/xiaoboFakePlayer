@@ -41,6 +41,7 @@ export interface SpawnFakePlayerRequest {
     readonly position: Point;
     readonly rotation: Rotation;
     readonly gameMode: FakePlayerGameMode;
+    readonly keepSaturated: boolean;
     readonly skin: FakePlayerSkin;
     readonly selectedSlot: number;
     readonly totalExperience: number;
@@ -103,7 +104,9 @@ export type RuntimeFakePlayerAction =
     | { readonly kind: "navigate"; readonly position: Point; readonly speed: number }
     | { readonly kind: "navigate_entity"; readonly targetId: string; readonly speed: number }
     | { readonly kind: "rotate"; readonly angle: number }
+    | { readonly kind: "set_game_mode"; readonly gameMode: FakePlayerGameMode }
     | { readonly kind: "set_rotation"; readonly angle: number }
+    | { readonly kind: "set_saturation"; readonly enabled: boolean }
     | { readonly kind: "set_sneaking"; readonly enabled: boolean }
     | { readonly kind: "stop" }
     | { readonly kind: "stop_moving" }
@@ -195,6 +198,16 @@ export interface RuntimeEntityTarget {
     readonly position: Point;
 }
 
+export interface RuntimeEntityInteractionTarget extends RuntimeEntityTarget {
+    readonly typeId: string;
+    readonly nameTag: string;
+}
+
+export interface EntityInteractionTargetQuery {
+    readonly maxDistance: number;
+    readonly typeId?: string;
+}
+
 export interface AttackTargetQuery {
     readonly maxDistance: number;
     readonly families: readonly string[];
@@ -227,6 +240,10 @@ export interface WorldQueries {
     hasLineOfSight(fakePlayerId: FakePlayerId, targetId: string): boolean;
     distanceSquared(fakePlayerId: FakePlayerId, targetId: string): number | undefined;
     findOnlinePlayer(playerId: string): RuntimeEntityTarget | undefined;
+    findInteractionTargets(
+        fakePlayerId: FakePlayerId,
+        query: EntityInteractionTargetQuery,
+    ): readonly RuntimeEntityInteractionTarget[];
     findAttackTargets(fakePlayerId: FakePlayerId, query: AttackTargetQuery): readonly RuntimeEntityTarget[];
     getBlockInfo(dimension: DimensionKey, position: Point): RuntimeBlockInfo | undefined;
 }

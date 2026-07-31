@@ -78,6 +78,27 @@ export class SapiWorldQueries {
         const player = world.getAllPlayers().find((candidate) => candidate.playfabId === playerId);
         return player === undefined ? undefined : toTarget(player);
     }
+    findInteractionTargets(fakePlayerId, query) {
+        const fakePlayer = this.runtime.getHandle(fakePlayerId);
+        if (fakePlayer === undefined)
+            return [];
+        return fakePlayer.dimension.getEntities({
+            excludeTypes: ["minecraft:player"],
+            families: ["mob"],
+            location: fakePlayer.location,
+            maxDistance: query.maxDistance,
+        })
+            .filter((entity) => entity.isValid
+            && entity.id !== fakePlayer.id
+            && (query.typeId === undefined || entity.typeId === query.typeId))
+            .map((entity) => ({
+            ...toTarget(entity),
+            typeId: entity.typeId,
+            nameTag: entity.nameTag,
+        }))
+            .sort((left, right) => distanceSquared(left.position, fakePlayer.location)
+            - distanceSquared(right.position, fakePlayer.location));
+    }
     findAttackTargets(fakePlayerId, query) {
         const fakePlayer = this.runtime.getHandle(fakePlayerId);
         if (fakePlayer === undefined)

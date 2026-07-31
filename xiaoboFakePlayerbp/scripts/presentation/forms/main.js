@@ -129,8 +129,8 @@ async function openDetailForm(player, services, record) {
             actions.push(() => openBehaviorForm(player, services, record, (updated) => openDetailForm(player, services, updated)));
             form.button(t("xiaobo.fp.form.detail.rename"));
             actions.push(() => openRenameForm(player, services, record));
-            form.button(t("xiaobo.fp.form.detail.respawn"));
-            actions.push(() => openRespawnRuleForm(player, services, record));
+            form.button(t("xiaobo.fp.form.detail.other_settings"));
+            actions.push(() => openOtherSettingsForm(player, services, record));
             form.button(t("xiaobo.fp.form.detail.inventory"));
             actions.push(() => openInventoryForm(player, services, record, (updated) => openDetailForm(player, services, updated)));
         }
@@ -174,9 +174,16 @@ async function openActionForm(player, services, record) {
         }
         const form = new ActionFormData().title(t("xiaobo.fp.form.detail.actions"));
         entries.forEach(([label]) => form.button(label));
+        if (isCapabilityEnabled("nearby_mob_interaction")) {
+            form.button(t("xiaobo.fp.form.action.interact_mob"));
+        }
         const response = await form.show(player);
         if (response.canceled || response.selection === undefined || !ready(player, services))
             return;
+        if (isCapabilityEnabled("nearby_mob_interaction") && response.selection === entries.length) {
+            await openMobInteractionForm(player, services, record);
+            return;
+        }
         const selected = entries[response.selection];
         if (selected === undefined)
             return;
@@ -192,6 +199,76 @@ async function openActionForm(player, services, record) {
         player.sendMessage({ translate: "xiaobo.fp.message.action_ok", with: [current.value.name] });
     });
 }
+async function openMobInteractionForm(player, services, record) {
+    await formBoundary(player, `interact-mob:${record.id}`, async () => {
+        if (!ready(player, services))
+            return;
+        if (!isCapabilityEnabled("nearby_mob_interaction")) {
+            await openMobTypeInteractionForm(player, services, record);
+            return;
+        }
+        const current = loadCurrentRecord(player, services, record.id);
+        if (!current.ok)
+            return sendError(player, current.error.message);
+        const targets = services.behavior.listInteractionTargets(actorIdentity(player), current.value.id, current.value.recordRevision);
+        if (!targets.ok)
+            return sendError(player, targets.error.message);
+        const actions = [];
+        const form = new ActionFormData()
+            .title(t("xiaobo.fp.form.action.interact_mob.title"))
+            .body(targets.value.length === 0
+            ? t("xiaobo.fp.form.action.interact_mob.empty")
+            : t("xiaobo.fp.form.action.interact_mob.body"));
+        targets.value.forEach((target) => {
+            form.button({
+                translate: "xiaobo.fp.form.action.interact_mob.target",
+                with: [target.nameTag || target.typeId, target.typeId, target.distance.toFixed(1)],
+            });
+            actions.push(() => performMobInteraction(player, services, record.id, target.id));
+        });
+        form.button(t("xiaobo.fp.form.action.interact_mob.by_id"));
+        actions.push(() => openMobTypeInteractionForm(player, services, record));
+        form.button(t("xiaobo.fp.form.back"));
+        actions.push(() => openActionForm(player, services, record));
+        const response = await form.show(player);
+        const action = response.selection === undefined ? undefined : actions[response.selection];
+        if (!response.canceled && action !== undefined && player.isValid && ready(player, services))
+            await action();
+    });
+}
+async function openMobTypeInteractionForm(player, services, record) {
+    const response = await new ModalFormData()
+        .title(t("xiaobo.fp.form.action.interact_mob.by_id"))
+        .textField(t("xiaobo.fp.form.action.interact_mob.type_id"), "minecraft:cow")
+        .submitButton(t("xiaobo.fp.form.action.interact_mob.submit"))
+        .show(player);
+    if (response.canceled || !ready(player, services))
+        return;
+    const typeId = response.formValues?.[0];
+    if (typeof typeId !== "string")
+        return sendError(player, "生物 ID 无效。");
+    const current = loadCurrentRecord(player, services, record.id);
+    if (!current.ok)
+        return sendError(player, current.error.message);
+    const targets = services.behavior.listInteractionTargets(actorIdentity(player), current.value.id, current.value.recordRevision, typeId);
+    if (!targets.ok)
+        return sendError(player, targets.error.message);
+    const target = targets.value[0];
+    if (target === undefined) {
+        player.sendMessage({ translate: "xiaobo.fp.message.interact_mob_not_found", with: [typeId.trim()] });
+        return;
+    }
+    await performMobInteraction(player, services, record.id, target.id);
+}
+async function performMobInteraction(player, services, id, targetId) {
+    const current = loadCurrentRecord(player, services, id);
+    if (!current.ok)
+        return sendError(player, current.error.message);
+    const result = services.behavior.perform(actorIdentity(player), current.value.id, current.value.recordRevision, { kind: "interact_entity", targetId });
+    if (!result.ok)
+        return sendError(player, result.error.message);
+    player.sendMessage({ translate: "xiaobo.fp.message.action_ok", with: [current.value.name] });
+}
 async function openRenameForm(player, services, record) {
     const response = await new ModalFormData()
         .title(t("xiaobo.fp.form.rename.title"))
@@ -205,21 +282,34 @@ async function openRenameForm(player, services, record) {
         return sendError(player, "新名称无效。");
     await runRecordMutation(player, services, record.id, (current) => services.lifecycle.rename(actorIdentity(player), current.id, current.recordRevision, { requestedName: name, unavailablePlayerNames: world.getAllPlayers().map((candidate) => candidate.name) }));
 }
-async function openRespawnRuleForm(player, services, record) {
+async function openOtherSettingsForm(player, services, record) {
     const response = await new ModalFormData()
-        .title(t("xiaobo.fp.form.respawn.title"))
-        .dropdown(t("xiaobo.fp.form.respawn.mode"), RESPAWN_MODES.map((mode) => t(`xiaobo.fp.respawn.${mode}`)), {
+        .title(t("xiaobo.fp.form.other_settings.title"))
+        .dropdown(t("xiaobo.fp.form.other_settings.game_mode"), GAME_MODES.map((mode) => t(`xiaobo.fp.gamemode.${mode}`)), {
+        defaultValueIndex: Math.max(0, GAME_MODES.indexOf(record.gameMode)),
+    })
+        .dropdown(t("xiaobo.fp.form.other_settings.respawn_mode"), RESPAWN_MODES.map((mode) => t(`xiaobo.fp.respawn.${mode}`)), {
         defaultValueIndex: Math.max(0, RESPAWN_MODES.indexOf(record.respawnMode)),
     })
-        .submitButton(t("xiaobo.fp.form.respawn.submit"))
+        .toggle(t("xiaobo.fp.form.other_settings.keep_saturated"), { defaultValue: record.keepSaturated })
+        .submitButton(t("xiaobo.fp.form.other_settings.submit"))
         .show(player);
     if (response.canceled || !ready(player, services))
         return;
-    const index = response.formValues?.[0];
-    const mode = typeof index === "number" ? RESPAWN_MODES[index] : undefined;
-    if (mode === undefined)
-        return sendError(player, "复活规则无效。");
-    await runRecordMutation(player, services, record.id, (current) => services.lifecycle.setRespawnRule(actorIdentity(player), current.id, current.recordRevision, mode, mode === "manual" ? playerLocation(player) : undefined));
+    const gameModeIndex = response.formValues?.[0];
+    const respawnModeIndex = response.formValues?.[1];
+    const keepSaturated = response.formValues?.[2];
+    const gameMode = typeof gameModeIndex === "number" ? GAME_MODES[gameModeIndex] : undefined;
+    const respawnMode = typeof respawnModeIndex === "number" ? RESPAWN_MODES[respawnModeIndex] : undefined;
+    if (gameMode === undefined || respawnMode === undefined || typeof keepSaturated !== "boolean") {
+        return sendError(player, "其他功能表单数据无效。");
+    }
+    await runRecordMutation(player, services, record.id, (current) => services.lifecycle.setOtherSettings(actorIdentity(player), current.id, current.recordRevision, {
+        gameMode,
+        keepSaturated,
+        respawnMode,
+        manualRespawnLocation: respawnMode === "manual" ? playerLocation(player) : undefined,
+    }));
 }
 async function confirmPurge(player, services, record) {
     const response = await new MessageFormData()

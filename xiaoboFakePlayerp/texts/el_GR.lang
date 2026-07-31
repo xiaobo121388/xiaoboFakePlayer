@@ -21,6 +21,7 @@ xiaobo.fp.form.detail.purge=Κίνδυνος: απόρριψη περιεχομ�
 xiaobo.fp.form.action.teleport=Τηλεμεταφορά εδώ
 xiaobo.fp.form.action.navigate=Πλοήγηση εδώ
 xiaobo.fp.form.action.lookat=Κοίτα με (μία φορά)
+xiaobo.fp.form.action.lookat_coordinates=Κοίτα προς συντεταγμένες
 xiaobo.fp.form.action.lookat_continuous=Κοίτα με (συνεχώς)
 xiaobo.fp.form.action.jump=Άλμα
 xiaobo.fp.form.action.sneak=Έναρξη κατασκοπής

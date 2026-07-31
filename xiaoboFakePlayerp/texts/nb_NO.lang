@@ -21,6 +21,7 @@ xiaobo.fp.form.detail.purge=Fare: Forlat Innhold og Slett
 xiaobo.fp.form.action.teleport=Teleporter Hit
 xiaobo.fp.form.action.navigate=Naviger Hit
 xiaobo.fp.form.action.lookat=Se på Meg (Én Gang)
+xiaobo.fp.form.action.lookat_coordinates=Se mot koordinater
 xiaobo.fp.form.action.lookat_continuous=Se på Meg (Kontinuerlig)
 xiaobo.fp.form.action.jump=Hopp
 xiaobo.fp.form.action.sneak=Start Sniking

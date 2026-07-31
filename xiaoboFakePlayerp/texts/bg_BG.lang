@@ -21,6 +21,7 @@ xiaobo.fp.form.detail.purge=Опасност: изтрий без възстан
 xiaobo.fp.form.action.teleport=Телепортирай тук
 xiaobo.fp.form.action.navigate=Приближи се тук
 xiaobo.fp.form.action.lookat=Гледай мен (веднъж)
+xiaobo.fp.form.action.lookat_coordinates=Погледни към координати
 xiaobo.fp.form.action.lookat_continuous=Гледай мен (постоянно)
 xiaobo.fp.form.action.jump=Скок
 xiaobo.fp.form.action.sneak=Приклекни

@@ -244,7 +244,7 @@ export class SapiFakePlayerRuntime {
                 player.lookAtLocation(action.position);
                 return { accepted: true };
             case "look_at_once":
-                player.setRotation(action.rotation);
+                player.lookAtLocation(action.position);
                 return { accepted: true };
             case "look_at_entity": {
                 const target = world.getEntity(action.targetId);

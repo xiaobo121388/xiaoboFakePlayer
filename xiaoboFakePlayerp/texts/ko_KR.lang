@@ -21,6 +21,7 @@ xiaobo.fp.form.detail.purge=위험：내용물 포기 후 완전 삭제
 xiaobo.fp.form.action.teleport=여기로 순간이동
 xiaobo.fp.form.action.navigate=여기로 유도
 xiaobo.fp.form.action.lookat=나를 보기(1회)
+xiaobo.fp.form.action.lookat_coordinates=좌표 보기
 xiaobo.fp.form.action.lookat_continuous=나를 보기(연속)
 xiaobo.fp.form.action.jump=점프
 xiaobo.fp.form.action.sneak=은신 시작

@@ -21,6 +21,7 @@ xiaobo.fp.form.detail.purge=Nebezpečí: smazat bez obnovy
 xiaobo.fp.form.action.teleport=Teleportovat sem
 xiaobo.fp.form.action.navigate=Přejít sem
 xiaobo.fp.form.action.lookat=Dívat se na mě (jednou)
+xiaobo.fp.form.action.lookat_coordinates=Dívat se na souřadnice
 xiaobo.fp.form.action.lookat_continuous=Dívat se na mě (neustále)
 xiaobo.fp.form.action.jump=Skok
 xiaobo.fp.form.action.sneak=Plížit se

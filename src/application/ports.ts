@@ -78,8 +78,17 @@ export type RuntimeBlockInteractionSelection =
     | { readonly mode: "slot"; readonly slot: number };
 
 export type RuntimeFakePlayerAction =
-    | { readonly kind: "attack_entity"; readonly targetId: string }
-    | { readonly kind: "break_block"; readonly position: Point; readonly face: BlockFace }
+    | {
+        readonly kind: "attack_entity";
+        readonly targetId: string;
+        readonly selectBestWeapon?: boolean;
+    }
+    | {
+        readonly kind: "break_block";
+        readonly position: Point;
+        readonly face: BlockFace;
+        readonly replaceExhaustedTool?: boolean;
+    }
     | {
         readonly kind: "build_block";
         readonly position: Point;

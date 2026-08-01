@@ -1,6 +1,7 @@
 import { BlockTypes, Direction, EntityComponentTypes, GameMode, world, } from "@minecraft/server";
 import { getPlayerSkin, LookDuration, PersonaArmSize, PersonaPieceType, SimulatedPlayer, spawnSimulatedPlayer, } from "@minecraft/server-gametest";
 import { HOTBAR_SLOT_COUNT, INVENTORY_SLOT_COUNT } from "../../domain/inventory.js";
+import { selectBestWeaponSlot, selectReplacementToolSlot, toolKind, } from "../../domain/inventorySelection.js";
 const TAG_PREFIX = "xiaobo_fp_";
 const MAX_EXPERIENCE_CHANGE = 16_777_216;
 const SATURATION_EFFECT = "minecraft:saturation";
@@ -8,6 +9,7 @@ const SATURATION_DURATION_TICKS = 120;
 const CLAIMABLE_PROJECTILE_TYPE_IDS = new Set(["minecraft:arrow", "minecraft:thrown_trident"]);
 export class SapiFakePlayerRuntime {
     handles = new Map();
+    miningTools = new Map();
     capturePlayerSkin(playerId) {
         const source = world.getAllPlayers().find((player) => player.playfabId === playerId);
         if (source === undefined)
@@ -26,6 +28,7 @@ export class SapiFakePlayerRuntime {
         if (this.get(request.id) !== undefined) {
             throw new Error(`spawn ${request.id}: 已存在有效运行时实例。`);
         }
+        this.miningTools.delete(request.id);
         const dimension = world.getDimension(request.dimension);
         const player = spawnSimulatedPlayer({ dimension, ...request.position }, request.name, toGameMode(request.gameMode));
         try {
@@ -56,8 +59,11 @@ export class SapiFakePlayerRuntime {
     }
     disconnect(id) {
         const player = this.handles.get(id);
-        if (player === undefined || !player.isValid)
+        this.miningTools.delete(id);
+        if (player === undefined || !player.isValid) {
+            this.handles.delete(id);
             return false;
+        }
         player.disconnect();
         this.handles.delete(id);
         return true;
@@ -137,10 +143,12 @@ export class SapiFakePlayerRuntime {
                 const target = world.getEntity(action.targetId);
                 if (target === undefined || !target.isValid)
                     return { accepted: false };
+                const equipped = action.selectBestWeapon === true && this.equipBestWeapon(id, player);
                 const accepted = player.attackEntity(target);
-                return { accepted, inventoryChanged: accepted };
+                return { accepted, inventoryChanged: accepted || equipped };
             }
             case "break_block": {
+                const replaced = action.replaceExhaustedTool === true && this.replaceExhaustedTool(id, player);
                 const accepted = player.breakBlock(action.position, toDirection(action.face));
                 const message = `[xiaobo-fake-player] mine ${id} start accepted=${accepted}; `
                     + `dimension=${player.dimension.id}; target=${formatPoint(action.position)}; `
@@ -149,7 +157,7 @@ export class SapiFakePlayerRuntime {
                     console.info(message);
                 else
                     console.warn(message);
-                return { accepted };
+                return { accepted, inventoryChanged: replaced };
             }
             case "build_block":
             case "interact_block": {
@@ -299,6 +307,7 @@ export class SapiFakePlayerRuntime {
                 player.stopInteracting();
                 player.stopMoving();
                 player.stopUsingItem();
+                this.miningTools.delete(id);
                 return { accepted: true };
             case "stop_moving":
                 player.stopMoving();
@@ -403,6 +412,7 @@ export class SapiFakePlayerRuntime {
             return undefined;
         if (!player.isValid) {
             this.handles.delete(id);
+            this.miningTools.delete(id);
             return undefined;
         }
         return toRuntimePlayer(id, player);
@@ -425,6 +435,7 @@ export class SapiFakePlayerRuntime {
             rebound.set(id, player);
         }
         this.handles.clear();
+        this.miningTools.clear();
         rebound.forEach((player, id) => this.handles.set(id, player));
         return Array.from(this.handles, ([id, player]) => toRuntimePlayer(id, player));
     }
@@ -432,9 +443,43 @@ export class SapiFakePlayerRuntime {
         const player = this.handles.get(id);
         if (player === undefined || !player.isValid) {
             this.handles.delete(id);
+            this.miningTools.delete(id);
             return undefined;
         }
         return player;
+    }
+    equipBestWeapon(id, player) {
+        const container = inventoryContainer(id, player, "attack");
+        const selectedSlot = player.selectedSlotIndex;
+        const weaponSlot = selectBestWeaponSlot(selectableItems(container), selectedSlot);
+        if (weaponSlot === undefined || weaponSlot === selectedSlot)
+            return false;
+        container.swapItems(weaponSlot, selectedSlot, container);
+        return true;
+    }
+    replaceExhaustedTool(id, player) {
+        const container = inventoryContainer(id, player, "mine");
+        const selectedSlot = player.selectedSlotIndex;
+        const selectedItem = container.getItem(selectedSlot);
+        const selected = selectedItem === undefined ? undefined : selectableItem(selectedSlot, selectedItem);
+        const selectedKind = selected === undefined ? undefined : toolKind(selected.typeId);
+        const remembered = this.miningTools.get(id);
+        if (selected !== undefined && selectedKind !== undefined && !isExhausted(selected)) {
+            this.miningTools.set(id, { slot: selectedSlot, kind: selectedKind });
+            return false;
+        }
+        const replacementKind = selectedKind
+            ?? (selectedItem === undefined && remembered?.slot === selectedSlot ? remembered.kind : undefined);
+        if (replacementKind === undefined) {
+            this.miningTools.delete(id);
+            return false;
+        }
+        this.miningTools.set(id, { slot: selectedSlot, kind: replacementKind });
+        const replacementSlot = selectReplacementToolSlot(selectableItems(container), replacementKind, selectedSlot);
+        if (replacementSlot === undefined)
+            return false;
+        container.swapItems(replacementSlot, selectedSlot, container);
+        return true;
     }
 }
 function toRuntimePlayer(id, player) {
@@ -516,5 +561,35 @@ function blockFaceCenter(position, face) {
         case "up": return { x: position.x + 0.5, y: position.y + 1, z: position.z + 0.5 };
         case "west": return { x: position.x, y: position.y + 0.5, z: position.z + 0.5 };
     }
+}
+function inventoryContainer(id, player, operation) {
+    const inventory = player.getComponent(EntityComponentTypes.Inventory);
+    if (inventory?.container === undefined)
+        throw new Error(`${operation} ${id}: 缺少库存容器。`);
+    return inventory.container;
+}
+function selectableItems(container) {
+    const items = [];
+    for (let slot = 0; slot < INVENTORY_SLOT_COUNT; slot += 1) {
+        const item = container.getItem(slot);
+        if (item !== undefined)
+            items.push(selectableItem(slot, item));
+    }
+    return items;
+}
+function selectableItem(slot, item) {
+    const durability = item.getComponent("minecraft:durability");
+    return {
+        slot,
+        typeId: item.typeId,
+        remainingDurability: durability === undefined || durability.unbreakable
+            ? null
+            : durability.maxDurability - durability.damage,
+        sharpnessLevel: item.getComponent("minecraft:enchantable")
+            ?.getEnchantment("minecraft:sharpness")?.level ?? 0,
+    };
+}
+function isExhausted(item) {
+    return item.remainingDurability !== null && item.remainingDurability <= 0;
 }
 //# sourceMappingURL=fakePlayerRuntime.js.map

@@ -378,7 +378,11 @@ export class BehaviorService {
             if (distanceSquared(runtime.position, target.position) > reachSquared
                 || !this.worldQueries.hasLineOfSight(record.id, target.id))
                 continue;
-            const receipt = this.executeRuntime(record.id, { kind: "attack_entity", targetId: target.id });
+            const receipt = this.executeRuntime(record.id, {
+                kind: "attack_entity",
+                targetId: target.id,
+                selectBestWeapon: true,
+            });
             return { attempted: true, accepted: receipt.accepted, blockReads: 0 };
         }
         const chaseTarget = targets[0];
@@ -440,6 +444,7 @@ export class BehaviorService {
                 kind: "break_block",
                 position: target,
                 face: resolved.target.face ?? mineTargetFace(eyePosition(runtime.position), target),
+                replaceExhaustedTool: true,
             });
             if (receipt.accepted)
                 this.activeMineTargets.set(record.id, resolved.target);
@@ -825,7 +830,7 @@ export class BehaviorService {
         const receipt = this.runtime.perform(id, action);
         if (receipt.accepted && interruptsMining(action.kind))
             this.activeMineTargets.delete(id);
-        if (receipt.accepted && receipt.inventoryChanged === true)
+        if (receipt.inventoryChanged === true)
             this.inventory.markDirty(id);
         return receipt;
     }

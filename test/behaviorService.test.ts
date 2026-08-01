@@ -45,6 +45,7 @@ class MemoryRuntime implements BehaviorRuntime {
     public readonly actions: RuntimeFakePlayerAction[] = [];
     public readonly projectileClaims: { readonly id: FakePlayerId; readonly radius: number }[] = [];
     public readonly inventorySlots = new Map<number, Omit<RuntimeInventorySlot, "slot">>();
+    public nextReceipt: RuntimeActionReceipt | undefined;
 
     public capturePlayerSkin() {
         return undefined;
@@ -104,6 +105,11 @@ class MemoryRuntime implements BehaviorRuntime {
 
     public perform(_id: FakePlayerId, action: RuntimeFakePlayerAction): RuntimeActionReceipt {
         this.actions.push(action);
+        if (this.nextReceipt !== undefined) {
+            const receipt = this.nextReceipt;
+            this.nextReceipt = undefined;
+            return receipt;
+        }
         if (action.kind === "navigate") return { accepted: true, fullPath: true };
         const changesInventory = action.kind === "attack_entity"
             || action.kind === "break_block"
@@ -922,6 +928,7 @@ test("follow within its distance yields to other automatic pathfinding", () => {
     assert.deepEqual(fixture.runtime.actions, [{
         kind: "attack_entity",
         targetId: "zombie-runtime",
+        selectBestWeapon: true,
     }]);
 });
 
@@ -1100,6 +1107,7 @@ test("automatic front mine uses the block hit by the eye ray", () => {
         kind: "break_block",
         position: { x: 2, y: 68, z: 4 },
         face: "west",
+        replaceExhaustedTool: true,
     });
     assert.deepEqual(fixture.queries.viewBlockMaxDistances, [7]);
 });
@@ -1729,6 +1737,7 @@ test("automatic front mine trusts the exact eye ray hit instead of recasting to 
         kind: "break_block",
         position: { x: 2, y: 65, z: 2 },
         face: "west",
+        replaceExhaustedTool: true,
     });
 });
 
@@ -1769,6 +1778,7 @@ test("automatic mining starts once and waits for the block to finish breaking", 
         kind: "break_block",
         position: { x: 0, y: 65, z: 1 },
         face: "north",
+        replaceExhaustedTool: true,
     });
     const waiting = fixture.service.tick(1);
     assert.equal(waiting.ok, true);
@@ -1878,4 +1888,18 @@ test("enabling automatic item use stops and disables active mining", () => {
     fixture.runtime.actions.length = 0;
     assert.equal(fixture.service.tick(1).ok, true);
     assert.deepEqual(fixture.runtime.actions.map(({ kind }) => kind), ["use_item"]);
+});
+
+test("inventory changes are checkpointed even when the runtime action is rejected", () => {
+    const fixture = createFixture();
+    const operator = { playerId: "operator", isOperator: true };
+    fixture.runtime.nextReceipt = { accepted: false, inventoryChanged: true };
+
+    assert.equal(fixture.service.perform(operator, fixture.record.id, 4, {
+        kind: "attack_entity",
+        targetId: "entity-1",
+    }).ok, false);
+    const checkpoint = fixture.inventory.checkpointNext(20);
+    assert.equal(checkpoint.ok, true);
+    if (checkpoint.ok) assert.equal(checkpoint.value?.record.inventoryRevision, 1);
 });

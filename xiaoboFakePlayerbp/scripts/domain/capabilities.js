@@ -17,6 +17,12 @@ export const CAPABILITY_MATRIX = {
             detail: "模拟玩家可按视线命中点或指定坐标，通过原生建造和通用交互动作放置方块、激活按钮等方块。",
         },
         {
+            id: "automatic_inventory_selection",
+            availability: "enabled",
+            verification: "bedrock_26_33_required",
+            detail: "自动攻击可从 36 格库存选择普通近战伤害最高的原版武器；自动挖掘可在手持工具耗尽后换入同类别工具。",
+        },
+        {
             id: "automatic_projectile_claim",
             availability: "enabled",
             verification: "bedrock_26_33_required",

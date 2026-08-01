@@ -36,6 +36,8 @@ Back up your world and read the release notes before updating the add-on. Do not
 - Exchange inventories, equipment, mainhand items, offhand items, or individual slots between a real player and a fake player, and transfer items or experience.
 - Look, move, navigate, jump, sneak, attack, mine, use items, interact with blocks, and interact with entities.
 - Configure persistent behaviors including following, automatic attacking, automatic mining, automatic interaction, timed item use, and trident/arrow ownership.
+- Automatic attack scans inventory and hotbar slots 0-35 and equips the vanilla weapon with the highest normal melee damage, including Sharpness. Ties keep the selected slot, then prefer the lower slot. Target-specific bonuses, status effects, and mace fall damage are not ranked.
+- Automatic mining remembers the held tool category and replaces an exhausted tool with the same category having the most durability remaining in slots 0-35.
 - Copy an online player's Persona appearance. The default skin is used when a classic skin texture cannot be copied.
 - Interact with an online fake player while empty-handed to open that fake player's settings directly.
 - Use the operator recovery center to resume interrupted item operations instead of overwriting items.

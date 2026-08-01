@@ -8,8 +8,6 @@ This file records the important player-facing changes in each stable release of 
 
 ## [1.1.0] - 2026-08-01
 
-This release includes changes starting with commit `852c4f7192add0295841e8b6bcdf927346925eb8`.
-
 ### Added
 
 - Added coordinate look controls. The management UI and `/xiaobo:fp_lookat <id or name> <x y z>` can now make a fake player look at absolute or `~` relative coordinates in the same dimension.

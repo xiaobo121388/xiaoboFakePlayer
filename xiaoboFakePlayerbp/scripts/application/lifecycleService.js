@@ -28,6 +28,26 @@ export class LifecycleService {
             return err("CONFLICT", loaded.diagnostics.join("; "));
         return ok(Object.values(loaded.state.value.records).sort((left, right) => left.id.localeCompare(right.id)));
     }
+    listRepairCandidates(actor) {
+        if (!actor.isOperator)
+            return err("PERMISSION_DENIED", "只有 OP 可以查看异常假人。");
+        const loaded = this.stateStore.loadCatalog();
+        if (!loaded.ok)
+            return err("CONFLICT", loaded.diagnostics.join("; "));
+        return ok(Object.values(loaded.state.value.records)
+            .filter((record) => record.lifecycle.kind !== "online" && record.lifecycle.kind !== "offline")
+            .sort((left, right) => left.id.localeCompare(right.id)));
+    }
+    listOrphanRepairCandidates(actor) {
+        if (!actor.isOperator)
+            return err("PERMISSION_DENIED", "只有 OP 可以查看孤儿假人实体。");
+        const loaded = this.stateStore.loadCatalog();
+        if (!loaded.ok)
+            return err("CONFLICT", loaded.diagnostics.join("; "));
+        return ok(this.runtime.listTagged(false)
+            .filter((player) => loaded.state.value.records[player.id] === undefined)
+            .sort((left, right) => left.id.localeCompare(right.id)));
+    }
     create(actor, request) {
         const authorization = this.authorize(actor, "create");
         if (!authorization.ok)
@@ -291,6 +311,68 @@ export class LifecycleService {
                 return deleting;
             const prepared = commitCatalogRecord(this.stateStore, context.value.catalogRevision, context.value.catalog, deleting.value);
             return prepared.ok ? this.finishDeleting(prepared.value) : prepared;
+        }
+        finally {
+            lease.value.release();
+        }
+    }
+    discardBroken(actor, id, expectedRecordRevision) {
+        if (!actor.isOperator) {
+            return err("PERMISSION_DENIED", "只有 OP 可以放弃并重置异常假人。");
+        }
+        const available = this.inventory.ensureNoPendingTransfer(id);
+        if (!available.ok)
+            return available;
+        const context = this.loadRecord(id, expectedRecordRevision);
+        if (!context.ok)
+            return context;
+        if (context.value.record.lifecycle.kind === "online" || context.value.record.lifecycle.kind === "offline") {
+            return err("INVALID_STATE", "正常假人不能通过修复界面重置，请使用常规删除功能。");
+        }
+        const lease = this.coordinator.tryAcquire([`fake:${id}`]);
+        if (!lease.ok)
+            return lease;
+        try {
+            const operation = {
+                ...createOperation(id, expectedRecordRevision, "delete", null, null),
+                phase: "repair_discard",
+            };
+            const deleting = {
+                ...context.value.record,
+                recordRevision: context.value.record.recordRevision + 1,
+                lifecycle: { kind: "deleting", operation },
+                expectedOnline: false,
+            };
+            const prepared = commitCatalogRecord(this.stateStore, context.value.catalogRevision, context.value.catalog, deleting);
+            return prepared.ok ? this.finishDeleting(prepared.value) : prepared;
+        }
+        finally {
+            lease.value.release();
+        }
+    }
+    discardOrphan(actor, id) {
+        if (!actor.isOperator) {
+            return err("PERMISSION_DENIED", "只有 OP 可以放弃并删除孤儿假人实体。");
+        }
+        const lease = this.coordinator.tryAcquire([`fake:${id}`]);
+        if (!lease.ok)
+            return lease;
+        try {
+            const available = this.inventory.ensureNoPendingTransfer(id);
+            if (!available.ok)
+                return available;
+            const loaded = this.stateStore.loadCatalog();
+            if (!loaded.ok)
+                return err("CONFLICT", loaded.diagnostics.join("; "));
+            if (loaded.state.value.records[id] !== undefined) {
+                return err("INVALID_STATE", `假人 ${id} 已有关联记录，不能作为孤儿实体删除。`);
+            }
+            const orphan = this.runtime.listTagged(false).find((player) => player.id === id);
+            if (orphan === undefined)
+                return err("NOT_FOUND", `孤儿假人实体 ${id} 已不存在。`);
+            if (!this.runtime.disconnect(id))
+                return err("CONFLICT", `无法断开孤儿假人实体 ${id}。`);
+            return ok({ id, name: orphan.name });
         }
         finally {
             lease.value.release();
@@ -581,13 +663,17 @@ export class LifecycleService {
             return err("CONFLICT", `无法断开待删除假人 ${current.record.id}。`);
         }
         if (operation.phase !== "snapshot_removed") {
-            if (current.record.inventoryRevision !== null) {
-                const removed = this.snapshots.remove(snapshotId(current.record.id, current.record.inventoryRevision));
-                if (!removed.ok)
-                    return removed;
-            }
-            if (current.record.inventoryFallbackRevision !== null) {
-                const removed = this.snapshots.remove(snapshotId(current.record.id, current.record.inventoryFallbackRevision));
+            const revisions = new Set([
+                current.record.inventoryRevision,
+                current.record.inventoryFallbackRevision,
+                ...(operation.phase === "repair_discard"
+                    ? [(current.record.inventoryRevision ?? 0) + 1]
+                    : []),
+            ]);
+            for (const revision of revisions) {
+                if (revision === null)
+                    continue;
+                const removed = this.snapshots.remove(snapshotId(current.record.id, revision));
                 if (!removed.ok)
                     return removed;
             }

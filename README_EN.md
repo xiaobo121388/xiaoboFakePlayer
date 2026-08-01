@@ -40,7 +40,7 @@ Back up your world and read the release notes before updating the add-on. Do not
 - Automatic mining remembers the held tool category and replaces an exhausted tool with the same category having the most durability remaining in slots 0-35.
 - Copy an online player's Persona appearance. The default skin is used when a classic skin texture cannot be copied.
 - Interact with an online fake player while empty-handed to open that fake player's settings directly.
-- Use the operator recovery center to resume interrupted item operations instead of overwriting items.
+- Use the operator recovery center to resume interrupted item operations instead of overwriting items. While startup is in read-only isolation, `/xiaobo:fpset` opens the repair menu directly so an operator can choose an exceptional record or a tagged orphan entity, confirm permanent data loss, delete the target, and retry startup recovery automatically.
 
 ## Permissions
 
@@ -70,7 +70,7 @@ The graphical menus are recommended for everyday management. The following 29 co
 
 | Command | Usage |
 |---|---|
-| `/xiaobo:fpset` | Open the fake-player management menu. |
+| `/xiaobo:fpset` | Open the fake-player management menu, or the operator repair menu while the system is in read-only isolation. |
 | `/xiaobo:fp_spawn [name] [game mode] [skin]` | Create a fake player at your location. The name defaults to `假人`. Game mode may be `survival`, `creative`, `adventure`, or `spectator` and defaults to `survival`. Skin may be `default` or `copy_actor` and defaults to `default`. |
 | `/xiaobo:fp_list` | List every fake player's stable ID, name, online state, dimension, and saved position. |
 | `/xiaobo:fp_online <id or name> [saved\|here]` | Bring a fake player online at its saved position, or at the executor's current position when `here` is specified. |
@@ -80,7 +80,7 @@ The graphical menus are recommended for everyday management. The following 29 co
 | `/xiaobo:fp_respawn <id or name>` | Manually respawn a fake player that is in the dead state. |
 | `/xiaobo:fp_respawnrule <id or name> <death_location\|manual\|player_spawn>` | Set the respawn position to the death location, the executor's current position when choosing `manual`, or the player spawn point. |
 | `/xiaobo:fp_permission <player selector> <can_place\|can_set> <on\|off>` | Operators only. Grant or revoke a permission for exactly one online real player. |
-| `/xiaobo:fp_recovery` | Operators only. Open the recovery center for pending item operations. |
+| `/xiaobo:fp_recovery` | Operators only. Open the recovery center for pending item operations and exceptional fake-player records. |
 | `/xiaobo:fp_diagnose [id or name]` | Operators only. View system status, optionally limited to one fake player. |
 
 ### Immediate Action Commands
@@ -124,7 +124,8 @@ These commands require the target fake player to be online. The add-on subsequen
 - Do not manually delete structures, world dynamic properties, or tagged fake-player entities created by this add-on, as doing so may prevent inventory snapshots from being recovered.
 - Prefer the default `recycle` mode when deleting a fake player. Use the irreversible `purge` mode only after confirming that its items, experience, and snapshots are no longer needed.
 - If an operation is interrupted, ask an operator to open `/xiaobo:fp_recovery` first. Do not repeatedly delete, recreate, or overwrite the same fake player.
-- Wait for the relevant chunks to load while the system reports that it is recovering. If it reports read-only isolation, an operator can use `/xiaobo:fp_diagnose` to inspect the reason.
+- Wait for the relevant chunks to load while the system reports that it is recovering. During read-only isolation, an operator can open `/xiaobo:fpset` or `/xiaobo:fp_recovery`: retry listed item transactions first, then, when no transaction references it, choose an exceptional record or a stable-tagged entity with no catalog record and confirm permanent loss of its items, experience, snapshots, and settings. The add-on retries startup recovery automatically and restores all features only after recovery succeeds.
+- If the catalog or transaction A/B banks themselves are unreadable, the repair menu reports that condition and does not guess which record to delete. Preserve the world backup and capture the diagnostics with `/xiaobo:fp_diagnose`.
 - Before uninstalling the add-on or rolling back to an earlier version, safely take important fake players offline and make a separate world backup.
 
 ## Limitations

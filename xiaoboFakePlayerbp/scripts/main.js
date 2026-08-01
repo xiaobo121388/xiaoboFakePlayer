@@ -26,6 +26,7 @@ const behavior = new BehaviorService(stateStore, runtime, new SapiWorldQueries(r
 const permissions = new PermissionService(stateStore);
 const recovery = new RecoveryRunner(stateStore, runtime, snapshots, coordinator, inventory);
 let startupStatus = { state: "recovering" };
+let startupRecoveryRunning = false;
 let nextMineDiagnosticTick = 0;
 let nextPlaceDiagnosticTick = 0;
 const openInteractionForms = new Set();
@@ -35,7 +36,35 @@ const services = {
     lifecycle,
     permissions,
     getStartupStatus: () => startupStatus,
+    retryStartupRecovery: () => {
+        runStartupRecovery();
+        return startupStatus;
+    },
 };
+function runStartupRecovery() {
+    if (startupRecoveryRunning)
+        return;
+    startupRecoveryRunning = true;
+    startupStatus = { state: "recovering" };
+    startRecovery(recovery, {
+        scheduleRetry: (retry) => {
+            system.runTimeout(retry, 20);
+        },
+        updateStatus: (status) => {
+            startupStatus = status;
+        },
+        onReady: (summary) => {
+            startupRecoveryRunning = false;
+            console.info(`[xiaobo-fake-player] ready; rebound=${summary.reboundEntities}; `
+                + `records=${summary.recoveredRecords}; transfers=${summary.recoveredTransfers}`);
+            summary.diagnostics.forEach((diagnostic) => console.warn(`[xiaobo-fake-player] ${diagnostic}`));
+        },
+        onBlocked: (message) => {
+            startupRecoveryRunning = false;
+            console.error(`[xiaobo-fake-player] recovery blocked: ${message}`);
+        },
+    });
+}
 system.beforeEvents.startup.subscribe(({ customCommandRegistry }) => {
     registerCommands(customCommandRegistry, services);
 });
@@ -63,22 +92,7 @@ world.beforeEvents.playerInteractWithEntity.subscribe((event) => {
 });
 world.afterEvents.worldLoad.subscribe(() => {
     system.run(() => {
-        startRecovery(recovery, {
-            scheduleRetry: (retry) => {
-                system.runTimeout(retry, 20);
-            },
-            updateStatus: (status) => {
-                startupStatus = status;
-            },
-            onReady: (summary) => {
-                console.info(`[xiaobo-fake-player] ready; rebound=${summary.reboundEntities}; `
-                    + `records=${summary.recoveredRecords}; transfers=${summary.recoveredTransfers}`);
-                summary.diagnostics.forEach((diagnostic) => console.warn(`[xiaobo-fake-player] ${diagnostic}`));
-            },
-            onBlocked: (message) => {
-                console.error(`[xiaobo-fake-player] recovery blocked: ${message}`);
-            },
-        });
+        runStartupRecovery();
     });
 });
 world.afterEvents.entityDie.subscribe(({ deadEntity }) => {

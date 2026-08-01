@@ -18,7 +18,7 @@ export function registerCommands(registry, services) {
         cheatsRequired: false,
     }, schedulePlayerCommand(services, (player) => {
         void openMainForm(player, services);
-    }));
+    }, true));
     registry.registerCommand({
         name: "xiaobo:fp_spawn",
         description: "创建挂机假人",
@@ -76,7 +76,7 @@ export function registerCommands(registry, services) {
             return;
         }
         void openRecoveryForm(player, services);
-    }));
+    }, true));
     registry.registerCommand({
         name: "xiaobo:fp_diagnose",
         description: "只读输出挂机假人恢复与能力状态",

@@ -425,12 +425,14 @@ export class RecoveryRunner {
             return err("CONFLICT", `无法断开待删除假人 ${record.id}。`);
         }
         if (operation.phase !== "snapshot_removed") {
-            if (record.inventoryRevision !== null) {
-                const removed = this.snapshots.remove(snapshotId(record.id, record.inventoryRevision));
-                if (!removed.ok) return removed;
-            }
-            if (record.inventoryFallbackRevision !== null) {
-                const removed = this.snapshots.remove(snapshotId(record.id, record.inventoryFallbackRevision));
+            const revisions = new Set([
+                record.inventoryRevision,
+                record.inventoryFallbackRevision,
+                ...(operation.phase === "repair_discard" ? [(record.inventoryRevision ?? 0) + 1] : []),
+            ]);
+            for (const revision of revisions) {
+                if (revision === null) continue;
+                const removed = this.snapshots.remove(snapshotId(record.id, revision));
                 if (!removed.ok) return removed;
             }
             const advanced = advanceLifecycleOperation(currentRecord, currentRecord.recordRevision, "snapshot_removed");

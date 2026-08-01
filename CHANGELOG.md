@@ -1,5 +1,9 @@
 # 更新日志
 
+<p align="center">
+	<strong>简体中文</strong> | <a href="CHANGELOG_EN.md">English</a>
+</p>
+
 本文件记录小波假人各正式版本面向玩家的重要变化。
 
 ## [1.1.0] - 2026-08-01

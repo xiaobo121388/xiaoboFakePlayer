@@ -144,7 +144,7 @@ export interface FakePlayerRuntime {
     resolveInventorySlot(id: FakePlayerId, selection: RuntimeInventorySelection): RuntimeInventorySlot | undefined;
     perform(id: FakePlayerId, action: RuntimeFakePlayerAction): RuntimeActionReceipt;
     get(id: FakePlayerId): RuntimeFakePlayer | undefined;
-    listTagged(): readonly RuntimeFakePlayer[];
+    listTagged(rebind?: boolean): readonly RuntimeFakePlayer[];
 }
 
 export interface BehaviorRuntime extends FakePlayerRuntime {

@@ -417,7 +417,7 @@ export class SapiFakePlayerRuntime {
         }
         return toRuntimePlayer(id, player);
     }
-    listTagged() {
+    listTagged(rebind = true) {
         const rebound = new Map();
         for (const player of world.getAllPlayers()) {
             if (!(player instanceof SimulatedPlayer))
@@ -434,10 +434,12 @@ export class SapiFakePlayerRuntime {
             }
             rebound.set(id, player);
         }
-        this.handles.clear();
-        this.miningTools.clear();
-        rebound.forEach((player, id) => this.handles.set(id, player));
-        return Array.from(this.handles, ([id, player]) => toRuntimePlayer(id, player));
+        if (rebind) {
+            this.handles.clear();
+            this.miningTools.clear();
+            rebound.forEach((player, id) => this.handles.set(id, player));
+        }
+        return Array.from(rebound, ([id, player]) => toRuntimePlayer(id, player));
     }
     getHandle(id) {
         const player = this.handles.get(id);

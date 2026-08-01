@@ -32,6 +32,7 @@ export interface CommandServices {
     readonly lifecycle: LifecycleService;
     readonly permissions: PermissionService;
     getStartupStatus(): StartupStatus;
+    retryStartupRecovery(): StartupStatus;
 }
 
 type PlayerCommand = (player: Player, actor: ActorIdentity, args: readonly unknown[]) => void;
@@ -53,7 +54,7 @@ export function registerCommands(registry: CustomCommandRegistry, services: Comm
         cheatsRequired: false,
     }, schedulePlayerCommand(services, (player) => {
         void openMainForm(player, services);
-    }));
+    }, true));
 
     registry.registerCommand({
         name: "xiaobo:fp_spawn",
@@ -114,7 +115,7 @@ export function registerCommands(registry: CustomCommandRegistry, services: Comm
             return;
         }
         void openRecoveryForm(player, services);
-    }));
+    }, true));
 
     registry.registerCommand({
         name: "xiaobo:fp_diagnose",

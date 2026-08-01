@@ -2,6 +2,7 @@ import { Player, world, type RawMessage } from "@minecraft/server";
 import { ActionFormData, MessageFormData, ModalFormData } from "@minecraft/server-ui";
 
 import type { FakePlayerAction } from "../../application/behaviorService.js";
+import type { RuntimeFakePlayer } from "../../application/ports.js";
 import { isCapabilityEnabled } from "../../domain/capabilities.js";
 import type { FakePlayerGameMode, FakePlayerRecord, PermissionGrant, RespawnMode } from "../../domain/model.js";
 import { err, ok, type Result } from "../../domain/results.js";
@@ -18,6 +19,10 @@ const SKIN_MODES = ["default", "copy_actor"] as const;
 
 export async function openMainForm(player: Player, services: CommandServices): Promise<void> {
     await formBoundary(player, "main", async () => {
+        if (services.getStartupStatus().state === "blocked") {
+            await showRecoveryForm(player, services);
+            return;
+        }
         if (!ready(player, services)) return;
         const actor = actorIdentity(player);
         const capabilities = services.permissions.capabilities(actor);
@@ -517,43 +522,153 @@ export async function openRecoveryForm(player: Player, services: CommandServices
 }
 
 async function showRecoveryForm(player: Player, services: CommandServices): Promise<void> {
-    if (!ready(player, services)) return;
+    const startup = services.getStartupStatus();
+    if (startup.state === "recovering") {
+        ready(player, services);
+        return;
+    }
     const actor = actorIdentity(player);
     if (!actor.isOperator) return sendError(player, "只有 OP 可以使用恢复中心。");
-    const records = services.lifecycle.list(actorIdentity(player));
-    if (!records.ok) return sendError(player, records.error.message);
+    const records = services.lifecycle.listRepairCandidates(actor);
+    const orphans = loadOrphanRepairCandidates(services, actor);
     const pending = services.inventory.listPendingTransfers(actor);
-    if (!pending.ok) return sendError(player, pending.error.message);
-    const exceptional = records.value.filter((record) => record.lifecycle.kind !== "online"
-        && record.lifecycle.kind !== "offline");
-    const lifecycleBody = exceptional.length === 0
-        ? t("xiaobo.fp.form.recovery.no_lifecycle")
-        : exceptional.map((record) => `${record.id} ${record.name}: ${record.lifecycle.kind}`
-            + (record.lifecycle.kind === "error" ? `\n${record.lifecycle.message}` : "")).join("\n");
-    const lifecycleMessage: RawMessage = typeof lifecycleBody === "string"
-        ? { text: lifecycleBody }
-        : lifecycleBody;
-    const body = pending.value.length === 0
-        ? { rawtext: [lifecycleMessage, { text: "\n" }, t("xiaobo.fp.form.recovery.no_pending")] }
-        : lifecycleBody;
+    const exceptional = records.ok ? records.value : [];
+    const orphaned = orphans.ok ? orphans.value : [];
+    const transfers = pending.ok ? pending.value : [];
+    const body = [
+        ...(startup.state === "blocked"
+            ? [`§c假人系统处于只读隔离：${startup.message ?? "未知恢复错误"}§r`, ""]
+            : []),
+        records.ok
+            ? exceptional.length === 0
+                ? "没有需要人工重置的异常假人。"
+                : exceptional.map((record) => `${record.id} ${record.name}: ${record.lifecycle.kind}`
+                    + (record.lifecycle.kind === "error" ? `\n${record.lifecycle.message}` : "")).join("\n")
+            : `§c无法读取异常假人：${records.error.message}§r`,
+            orphans.ok
+                ? orphaned.length === 0
+                    ? "没有无记录的孤儿假人实体。"
+                    : orphaned.map((orphan) => `${orphan.id} ${orphan.name}: 无 catalog 记录`).join("\n")
+                : `§c无法读取孤儿假人实体：${orphans.error.message}§r`,
+        pending.ok
+            ? transfers.length === 0
+                ? "没有待恢复的库存或经验事务。"
+                : "存在待恢复事务，请先通过下方事务按钮完成恢复。"
+            : `§c无法读取待恢复事务：${pending.error.message}§r`,
+        "",
+        "重置会永久放弃所选假人的物品、经验、快照和设置，且无法撤销。",
+    ].join("\n");
     const actions: (() => Promise<void>)[] = [];
     const form = new ActionFormData()
         .title(t("xiaobo.fp.form.main.recovery"))
         .body(body);
-    for (const transfer of pending.value) {
+    for (const transfer of transfers) {
         form.button(`${transfer.kind} · ${transfer.phase}\n${transfer.fakePlayerId} -> ${transfer.playerId}`);
         actions.push(async () => {
             const result = services.inventory.retryPendingTransfer(actorIdentity(player), transfer.id);
             if (!result.ok) return sendError(player, result.error.message);
             player.sendMessage({ translate: "xiaobo.fp.message.recovery_ok", with: [transfer.id] });
-            await openRecoveryForm(player, services);
+            await retryRecoveryAndOpenNext(player, services);
         });
     }
-    form.button(t("xiaobo.fp.form.back"));
-    actions.push(() => openMainForm(player, services));
+    if (pending.ok) {
+        const pendingFakePlayerIds = new Set(transfers.map((transfer) => transfer.fakePlayerId));
+        for (const record of exceptional) {
+            if (pendingFakePlayerIds.has(record.id)) continue;
+            form.button(`危险：放弃数据并删除 ${record.name}\n${record.id} · ${record.lifecycle.kind}`);
+            actions.push(() => confirmRepairDiscard(player, services, record));
+        }
+        for (const orphan of orphaned) {
+            if (pendingFakePlayerIds.has(orphan.id)) continue;
+            form.button(`危险：删除孤儿实体 ${orphan.name}\n${orphan.id} · 无 catalog 记录`);
+            actions.push(() => confirmOrphanDiscard(player, services, orphan));
+        }
+    }
+    if (startup.state === "blocked") {
+        form.button("重新尝试恢复");
+        actions.push(() => retryRecoveryAndOpenNext(player, services));
+        form.button(t("xiaobo.fp.form.cancel"));
+        actions.push(async () => undefined);
+    } else {
+        form.button(t("xiaobo.fp.form.back"));
+        actions.push(() => openMainForm(player, services));
+    }
     const response = await form.show(player);
     const action = response.selection === undefined ? undefined : actions[response.selection];
-    if (!response.canceled && action !== undefined && player.isValid && ready(player, services)) await action();
+    if (!response.canceled && action !== undefined && player.isValid) await action();
+}
+
+async function confirmRepairDiscard(
+    player: Player,
+    services: CommandServices,
+    record: FakePlayerRecord,
+): Promise<void> {
+    const response = await new MessageFormData()
+        .title(t("xiaobo.fp.form.delete.title"))
+        .body({ translate: "xiaobo.fp.form.delete.body", with: [record.name, record.id] })
+        .button1(t("xiaobo.fp.form.cancel"))
+        .button2(t("xiaobo.fp.form.delete.confirm"))
+        .show(player);
+    if (response.canceled || response.selection !== 1 || !player.isValid) return;
+    const candidates = services.lifecycle.listRepairCandidates(actorIdentity(player));
+    if (!candidates.ok) return sendError(player, candidates.error.message);
+    const current = candidates.value.find((candidate) => candidate.id === record.id);
+    if (current === undefined) return sendError(player, `假人 ${record.id} 已不再需要人工重置。`);
+    const result = services.lifecycle.discardBroken(
+        actorIdentity(player),
+        current.id,
+        current.recordRevision,
+    );
+    if (!result.ok) return sendError(player, result.error.message);
+    player.sendMessage({ translate: "xiaobo.fp.message.deleted", with: [result.value.name] });
+    await retryRecoveryAndOpenNext(player, services);
+}
+
+async function confirmOrphanDiscard(
+    player: Player,
+    services: CommandServices,
+    orphan: RuntimeFakePlayer,
+): Promise<void> {
+    const response = await new MessageFormData()
+        .title(t("xiaobo.fp.form.delete.title"))
+        .body(`确定永久断开并删除孤儿假人实体 ${orphan.name}（${orphan.id}）吗？\n\n`
+            + "该实体没有 catalog 记录，物品和经验无法恢复，此操作无法撤销。")
+        .button1(t("xiaobo.fp.form.cancel"))
+        .button2(t("xiaobo.fp.form.delete.confirm"))
+        .show(player);
+    if (response.canceled || response.selection !== 1 || !player.isValid) return;
+    const candidates = loadOrphanRepairCandidates(services, actorIdentity(player));
+    if (!candidates.ok) return sendError(player, candidates.error.message);
+    const current = candidates.value.find((candidate) => candidate.id === orphan.id);
+    if (current === undefined) return sendError(player, `孤儿假人实体 ${orphan.id} 已不再需要人工重置。`);
+    const result = services.lifecycle.discardOrphan(actorIdentity(player), current.id);
+    if (!result.ok) return sendError(player, result.error.message);
+    player.sendMessage({ translate: "xiaobo.fp.message.deleted", with: [result.value.name] });
+    await retryRecoveryAndOpenNext(player, services);
+}
+
+function loadOrphanRepairCandidates(
+    services: CommandServices,
+    actor: ReturnType<typeof actorIdentity>,
+): Result<readonly RuntimeFakePlayer[]> {
+    try {
+        return services.lifecycle.listOrphanRepairCandidates(actor);
+    } catch (cause) {
+        const message = cause instanceof Error ? cause.message : String(cause);
+        console.error(`[xiaobo-fake-player] recovery orphan scan failed: ${message}`);
+        return err("CONFLICT", `无法扫描稳定标签实体：${message}`);
+    }
+}
+
+async function retryRecoveryAndOpenNext(player: Player, services: CommandServices): Promise<void> {
+    const status = services.retryStartupRecovery();
+    if (!player.isValid) return;
+    if (status.state === "ready") {
+        await openMainForm(player, services);
+        return;
+    }
+    if (status.state === "blocked") await openRecoveryForm(player, services);
+    else ready(player, services);
 }
 
 async function runRecordMutation(

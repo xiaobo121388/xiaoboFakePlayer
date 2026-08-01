@@ -359,6 +359,211 @@ test("snapshot failure leaves an online entity with snapshotting recovery intent
     assert.equal(fixture.runtime.players.has(created.value.id), true);
 });
 
+test("operator can discard a broken snapshotting record and unblock recovery", () => {
+    const fixture = createFixture();
+    const created = fixture.service.create(operator, createRequest);
+    assert.equal(created.ok, true);
+    if (!created.ok) return;
+    fixture.snapshots.failSave = true;
+
+    const offline = fixture.service.takeOffline(operator, created.value.id, created.value.recordRevision);
+    assert.equal(offline.ok, false);
+    fixture.runtime.players.delete(created.value.id);
+
+    const recovery = new RecoveryRunner(
+        fixture.state,
+        fixture.runtime,
+        fixture.snapshots,
+        fixture.coordinator,
+        fixture.inventory,
+    );
+    const blocked = recovery.run();
+    assert.equal(blocked.ok, false);
+    if (!blocked.ok) assert.match(blocked.error.message, /未验证快照阶段缺少在线实例/);
+    fixture.snapshots.saved.add(snapshotId(created.value.id, 1));
+
+    const candidates = fixture.service.listRepairCandidates(operator);
+    assert.equal(candidates.ok, true);
+    if (candidates.ok) assert.deepEqual(candidates.value.map((candidate) => candidate.id), [created.value.id]);
+
+    const loaded = fixture.state.loadCatalog();
+    assert.equal(loaded.ok, true);
+    if (!loaded.ok) return;
+    const record = loaded.state.value.records[created.value.id];
+    assert.notEqual(record, undefined);
+    if (record === undefined) return;
+    const discarded = fixture.service.discardBroken(
+        operator,
+        record.id,
+        record.recordRevision,
+    );
+    assert.equal(discarded.ok, true);
+    assert.equal(fixture.snapshots.has(snapshotId(created.value.id, 1)), false);
+    assert.equal(recovery.run().ok, true);
+
+    const repaired = fixture.state.loadCatalog();
+    assert.equal(repaired.ok, true);
+    if (repaired.ok) assert.equal(repaired.state.value.records[created.value.id], undefined);
+});
+
+test("repair discard is OP-only and rejects stable records", () => {
+    const fixture = createFixture();
+    const created = fixture.service.create(operator, createRequest);
+    assert.equal(created.ok, true);
+    if (!created.ok) return;
+
+    const hidden = fixture.service.listRepairCandidates({ playerId: "member", isOperator: false });
+    assert.equal(hidden.ok, false);
+    if (!hidden.ok) assert.equal(hidden.error.code, "PERMISSION_DENIED");
+
+    const denied = fixture.service.discardBroken(
+        { playerId: "member", isOperator: false },
+        created.value.id,
+        created.value.recordRevision,
+    );
+    assert.equal(denied.ok, false);
+    if (!denied.ok) assert.equal(denied.error.code, "PERMISSION_DENIED");
+
+    const stable = fixture.service.discardBroken(operator, created.value.id, created.value.recordRevision);
+    assert.equal(stable.ok, false);
+    if (!stable.ok) assert.equal(stable.error.code, "INVALID_STATE");
+    assert.notEqual(fixture.runtime.get(created.value.id), undefined);
+});
+
+test("recovery finishes an interrupted repair discard", () => {
+    const fixture = createFixture();
+    const created = fixture.service.create(operator, createRequest);
+    assert.equal(created.ok, true);
+    if (!created.ok) return;
+    const checkpoint = fixture.inventory.checkpoint(
+        created.value.id,
+        created.value.recordRevision,
+        10,
+    );
+    assert.equal(checkpoint.ok, true);
+    if (!checkpoint.ok) return;
+    fixture.snapshots.failSave = true;
+    assert.equal(fixture.service.takeOffline(
+        operator,
+        checkpoint.value.record.id,
+        checkpoint.value.record.recordRevision,
+    ).ok, false);
+    fixture.runtime.players.delete(created.value.id);
+    fixture.snapshots.saved.add(snapshotId(created.value.id, 2));
+
+    fixture.runtime.failDisconnect = true;
+    fixture.runtime.players.set(created.value.id, {
+        id: created.value.id,
+        name: created.value.name,
+        dimension: created.value.location.dimension,
+        position: created.value.location.position,
+        headPosition: { x: 1, y: 65.62, z: 2 },
+        rotation: created.value.location.rotation,
+        gameMode: created.value.gameMode,
+        isSneaking: false,
+        selectedSlot: created.value.selectedSlot,
+        totalExperience: created.value.totalExperience,
+        alive: true,
+    });
+    const loaded = fixture.state.loadCatalog();
+    assert.equal(loaded.ok, true);
+    if (!loaded.ok) return;
+    const record = loaded.state.value.records[created.value.id];
+    assert.notEqual(record, undefined);
+    if (record === undefined) return;
+    const interrupted = fixture.service.discardBroken(operator, record.id, record.recordRevision);
+    assert.equal(interrupted.ok, false);
+
+    const pending = fixture.state.loadCatalog();
+    assert.equal(pending.ok, true);
+    if (pending.ok) {
+        const pendingRecord = pending.state.value.records[record.id];
+        assert.equal(pendingRecord?.lifecycle.kind, "deleting");
+        assert.equal(
+            pendingRecord !== undefined && "operation" in pendingRecord.lifecycle
+                ? pendingRecord.lifecycle.operation?.phase
+                : undefined,
+            "repair_discard",
+        );
+    }
+    fixture.runtime.failDisconnect = false;
+    const recovery = new RecoveryRunner(
+        fixture.state,
+        fixture.runtime,
+        fixture.snapshots,
+        fixture.coordinator,
+        fixture.inventory,
+    );
+    assert.equal(recovery.run().ok, true);
+    assert.equal(fixture.snapshots.has(snapshotId(record.id, 1)), false);
+    assert.equal(fixture.snapshots.has(snapshotId(record.id, 2)), false);
+    const repaired = fixture.state.loadCatalog();
+    assert.equal(repaired.ok, true);
+    if (repaired.ok) assert.equal(repaired.state.value.records[record.id], undefined);
+});
+
+test("operator can discard a tagged runtime without a catalog record", () => {
+    const fixture = createFixture();
+    const created = fixture.service.create(operator, createRequest);
+    assert.equal(created.ok, true);
+    if (!created.ok) return;
+    const loaded = fixture.state.loadCatalog();
+    assert.equal(loaded.ok, true);
+    if (!loaded.ok) return;
+    assert.equal(fixture.state.commitCatalog(loaded.state.revision, {
+        ...loaded.state.value,
+        records: {},
+    }).ok, true);
+
+    const candidates = fixture.service.listOrphanRepairCandidates(operator);
+    assert.equal(candidates.ok, true);
+    if (!candidates.ok) return;
+    assert.deepEqual(candidates.value.map((candidate) => candidate.id), [created.value.id]);
+    assert.equal(fixture.service.discardOrphan({ playerId: "member", isOperator: false }, created.value.id).ok, false);
+
+    const operations = fixture.state.loadOperations();
+    assert.equal(operations.ok, true);
+    if (!operations.ok) return;
+    const transfer: ExperienceTransfer = {
+        id: `${created.value.id}:experience:orphan`,
+        fakePlayerId: created.value.id,
+        playerId: operator.playerId,
+        fakePlayerRevision: created.value.recordRevision,
+        kind: "fake_to_player",
+        fakePlayerBefore: 1,
+        playerBefore: 0,
+        amount: 1,
+        phase: "applying",
+    };
+    assert.equal(fixture.state.commitOperations(operations.state.revision, {
+        ...operations.state.value,
+        experienceTransfers: { [transfer.id]: transfer },
+    }).ok, true);
+    const protectedResult = fixture.service.discardOrphan(operator, created.value.id);
+    assert.equal(protectedResult.ok, false);
+    if (!protectedResult.ok) assert.equal(protectedResult.error.code, "CONFLICT");
+    const pending = fixture.state.loadOperations();
+    assert.equal(pending.ok, true);
+    if (!pending.ok) return;
+    assert.equal(fixture.state.commitOperations(pending.state.revision, {
+        ...pending.state.value,
+        experienceTransfers: {},
+    }).ok, true);
+
+    const discarded = fixture.service.discardOrphan(operator, created.value.id);
+
+    assert.deepEqual(discarded, { ok: true, value: { id: created.value.id, name: created.value.name } });
+    assert.equal(fixture.runtime.get(created.value.id), undefined);
+    const recovery = new RecoveryRunner(
+        fixture.state,
+        fixture.runtime,
+        fixture.snapshots,
+        fixture.coordinator,
+        fixture.inventory,
+    );
+    assert.equal(recovery.run().ok, true);
+});
+
 test("disconnect failure keeps snapshotting intent instead of publishing offline state", () => {
     const fixture = createFixture();
     const created = fixture.service.create(operator, createRequest);
@@ -792,6 +997,35 @@ test("purge refuses online records then removes an offline record and its snapsh
     const loaded = fixture.state.loadCatalog();
     assert.equal(loaded.ok, true);
     if (loaded.ok) assert.equal(loaded.state.value.records[offline.value.id], undefined);
+});
+
+test("error purge does not use repair discard snapshot cleanup", () => {
+    const fixture = createFixture();
+    const created = fixture.service.create(operator, createRequest);
+    assert.equal(created.ok, true);
+    if (!created.ok) return;
+    const offline = fixture.service.takeOffline(operator, created.value.id, created.value.recordRevision);
+    assert.equal(offline.ok, true);
+    if (!offline.ok) return;
+    const loaded = fixture.state.loadCatalog();
+    assert.equal(loaded.ok, true);
+    if (!loaded.ok) return;
+    const errorRecord = {
+        ...offline.value,
+        recordRevision: offline.value.recordRevision + 1,
+        lifecycle: { kind: "error" as const, message: "injected failure" },
+    };
+    assert.equal(fixture.state.commitCatalog(loaded.state.revision, {
+        ...loaded.state.value,
+        records: { ...loaded.state.value.records, [errorRecord.id]: errorRecord },
+    }).ok, true);
+    const nextSnapshotId = snapshotId(errorRecord.id, (errorRecord.inventoryRevision ?? 0) + 1);
+    fixture.snapshots.saved.add(nextSnapshotId);
+
+    const purged = fixture.service.purge(operator, errorRecord.id, errorRecord.recordRevision);
+
+    assert.equal(purged.ok, true);
+    assert.equal(fixture.snapshots.has(nextSnapshotId), true);
 });
 
 test("recycle transfers inventory and experience before deleting the offline record", () => {

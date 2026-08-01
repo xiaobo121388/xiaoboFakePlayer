@@ -64,9 +64,12 @@ export class SapiFakePlayerRuntime implements FakePlayerRuntime {
             toGameMode(request.gameMode),
         );
         try {
+            player.teleport(request.position, {
+                dimension,
+                rotation: request.rotation,
+            });
             player.addTag(`${TAG_PREFIX}${request.id}`);
             if (request.skin.kind === "persona") player.setSkin(toPlayerSkinData(request.skin));
-            player.setRotation(request.rotation);
             player.selectedSlotIndex = request.selectedSlot;
             addExperience(player, request.totalExperience);
             if (request.keepSaturated) {

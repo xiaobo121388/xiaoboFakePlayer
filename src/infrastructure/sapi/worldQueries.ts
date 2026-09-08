@@ -10,6 +10,7 @@ import type {
     WorldQueries,
 } from "../../application/ports.js";
 import type { DimensionKey, FakePlayerId, Point } from "../../domain/model.js";
+import { matchesPlayerId } from "../../presentation/playerContext.js";
 import { SapiFakePlayerRuntime } from "./fakePlayerRuntime.js";
 
 export class SapiWorldQueries implements WorldQueries {
@@ -99,7 +100,7 @@ export class SapiWorldQueries implements WorldQueries {
     }
 
     public findOnlinePlayer(playerId: string): RuntimeEntityTarget | undefined {
-        const player = world.getAllPlayers().find((candidate) => candidate.playfabId === playerId);
+        const player = world.getAllPlayers().find((candidate) => matchesPlayerId(candidate, playerId));
         return player === undefined ? undefined : toTarget(player);
     }
 

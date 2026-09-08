@@ -8,18 +8,18 @@ export interface CapabilityEntry {
 }
 
 export interface CapabilityMatrix {
-    readonly gameVersion: "1.26.33";
-    readonly serverVersion: "2.9.0-beta.1.26.33-stable";
-    readonly serverUiVersion: "2.2.0-beta.1.26.33-stable";
-    readonly gameTestVersion: "1.0.0-beta.1.26.33-stable";
+    readonly gameVersion: "1.26.45";
+    readonly serverVersion: "2.10.0-beta.1.26.44-stable";
+    readonly serverUiVersion: "2.2.0-beta.1.26.44-stable";
+    readonly gameTestVersion: "1.0.0-beta.1.26.44-stable";
     readonly capabilities: readonly CapabilityEntry[];
 }
 
 export const CAPABILITY_MATRIX: CapabilityMatrix = {
-    gameVersion: "1.26.33",
-    serverVersion: "2.9.0-beta.1.26.33-stable",
-    serverUiVersion: "2.2.0-beta.1.26.33-stable",
-    gameTestVersion: "1.0.0-beta.1.26.33-stable",
+    gameVersion: "1.26.45",
+    serverVersion: "2.10.0-beta.1.26.44-stable",
+    serverUiVersion: "2.2.0-beta.1.26.44-stable",
+    gameTestVersion: "1.0.0-beta.1.26.44-stable",
     capabilities: [
         {
             id: "simulated_player",
@@ -85,7 +85,7 @@ export const CAPABILITY_MATRIX: CapabilityMatrix = {
             id: "hunger_saturation_write",
             availability: "hidden_pending_game_validation",
             verification: "bedrock_26_33_required",
-            detail: "公开组件存在，但写入语义尚未通过正式版 1.26.33 实机验证。",
+            detail: "公开组件存在，但写入语义尚未通过正式版 1.26.45 实机验证。",
         },
         {
             id: "persistent_saturation_effect",

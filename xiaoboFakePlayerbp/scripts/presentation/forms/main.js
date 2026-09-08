@@ -3,7 +3,7 @@ import { ActionFormData, MessageFormData, ModalFormData } from "@minecraft/serve
 import { isCapabilityEnabled } from "../../domain/capabilities.js";
 import { err, ok } from "../../domain/results.js";
 import { withMinecraftNamespace } from "../../domain/validation.js";
-import { actorIdentity, isRealPlayer, playerLocation } from "../playerContext.js";
+import { actorIdentity, getPlayerStableId, isRealPlayer, matchesPlayerId, playerLocation } from "../playerContext.js";
 import { openBehaviorForm } from "./behaviors.js";
 import { formBoundary, ready, sendError, t } from "./formSupport.js";
 import { openInventoryForm } from "./inventory.js";
@@ -397,9 +397,10 @@ async function openPermissionsForm(player, services) {
         if (response.canceled || response.selection === undefined || !ready(player, services))
             return;
         const target = targets[response.selection];
-        if (target === undefined || target.playfabId.length === 0)
+        const targetId = target ? getPlayerStableId(target) : "";
+        if (target === undefined || targetId.length === 0)
             return sendError(player, "目标玩家无效。");
-        await openPermissionEditor(player, services, target.playfabId, target.name);
+        await openPermissionEditor(player, services, targetId, target.name);
     });
 }
 async function openPermissionEditor(player, services, targetId, targetName) {
@@ -419,7 +420,7 @@ async function openPermissionEditor(player, services, targetId, targetName) {
     if (!latestActor.isOperator)
         return sendError(player, "只有 OP 可以修改权限。");
     const target = world.getAllPlayers().filter(isRealPlayer)
-        .find((candidate) => candidate.playfabId === targetId);
+        .find((candidate) => matchesPlayerId(candidate, targetId));
     if (target === undefined)
         return sendError(player, "目标玩家已离线，未修改权限。");
     const [canPlace, canSet] = response.formValues;

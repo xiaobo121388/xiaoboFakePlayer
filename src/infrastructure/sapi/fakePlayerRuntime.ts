@@ -38,6 +38,7 @@ import {
     type ToolKind,
 } from "../../domain/inventorySelection.js";
 import type { FakePlayerGameMode, FakePlayerId, FakePlayerSkin, Point, SavedLocation } from "../../domain/model.js";
+import { matchesPlayerId } from "../../presentation/playerContext.js";
 
 const TAG_PREFIX = "xiaobo_fp_";
 const MAX_EXPERIENCE_CHANGE = 16_777_216;
@@ -50,7 +51,7 @@ export class SapiFakePlayerRuntime implements FakePlayerRuntime {
     private readonly miningTools = new Map<FakePlayerId, { readonly slot: number; readonly kind: ToolKind }>();
 
     public capturePlayerSkin(playerId: string): FakePlayerSkin | undefined {
-        const source = world.getAllPlayers().find((player) => player.playfabId === playerId);
+        const source = world.getAllPlayers().find((player) => matchesPlayerId(player, playerId));
         if (source === undefined) throw new Error(`skin ${playerId}: 未找到在线真人玩家。`);
         const skin = getPlayerSkin(source);
         if (skin.personaPieces === undefined || skin.personaPieces.length === 0) return undefined;

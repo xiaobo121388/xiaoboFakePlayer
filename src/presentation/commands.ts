@@ -19,7 +19,7 @@ import type { FakePlayerGameMode, FakePlayerRecord, RespawnMode } from "../domai
 import type { ActorIdentity } from "../domain/permissions.js";
 import type { BlockFace } from "../application/ports.js";
 import { openMainForm, openRecoveryForm } from "./forms/main.js";
-import { actorIdentity, isRealPlayer, playerLocation } from "./playerContext.js";
+import { actorIdentity, getPlayerStableId, isRealPlayer, playerLocation } from "./playerContext.js";
 
 export interface StartupStatus {
     readonly state: "recovering" | "ready" | "blocked";
@@ -239,12 +239,13 @@ export function registerCommands(registry: CustomCommandRegistry, services: Comm
             return;
         }
         const target = targets[0];
-        if (target === undefined || target.playfabId.length === 0) {
-            player.sendMessage("§c目标必须是拥有 PlayFab ID 的真人玩家。§r");
+        const targetId = target ? getPlayerStableId(target) : "";
+        if (target === undefined || targetId.length === 0) {
+            player.sendMessage("§c目标必须是拥有持久稳定 ID 的真人玩家。§r");
             return;
         }
         const result = services.permissions.setGrant(actor, {
-            playerId: target.playfabId,
+            playerId: targetId,
             lastKnownName: target.name,
         }, permission as GrantKind, enabled === "on");
         player.sendMessage(result.ok

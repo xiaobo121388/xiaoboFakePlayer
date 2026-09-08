@@ -1,6 +1,7 @@
 import { world, } from "@minecraft/server";
 import { TOTAL_SLOT_COUNT } from "../../domain/inventory.js";
 import { err, ok } from "../../domain/results.js";
+import { matchesPlayerId } from "../../presentation/playerContext.js";
 import { imagesEqual, itemStacksEqual, readPlayerImage, writePlayerImage, } from "./structureInventorySnapshotStore.js";
 const PLAYER_INVENTORY_SLOT_COUNT = 36;
 const MAX_EXPERIENCE_CHANGE = 16_777_216;
@@ -153,7 +154,7 @@ export class SapiInventoryAccess {
         return failure;
     }
     findPlayer(playerId) {
-        const player = world.getAllPlayers().find((candidate) => candidate.playfabId === playerId);
+        const player = world.getAllPlayers().find((candidate) => matchesPlayerId(candidate, playerId));
         return player === undefined
             ? err("INVALID_STATE", `玩家 ${playerId} 当前不在线。`)
             : ok(player);

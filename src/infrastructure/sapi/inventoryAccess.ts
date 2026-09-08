@@ -13,6 +13,7 @@ import type {
 import { TOTAL_SLOT_COUNT } from "../../domain/inventory.js";
 import type { ExperienceTransfer, InventoryTransfer } from "../../domain/model.js";
 import { err, ok, type Result } from "../../domain/results.js";
+import { matchesPlayerId } from "../../presentation/playerContext.js";
 import { SapiFakePlayerRuntime } from "./fakePlayerRuntime.js";
 import {
     imagesEqual,
@@ -232,7 +233,7 @@ export class SapiInventoryAccess implements InventoryAccess {
     }
 
     private findPlayer(playerId: string): Result<Player> {
-        const player = world.getAllPlayers().find((candidate) => candidate.playfabId === playerId);
+        const player = world.getAllPlayers().find((candidate) => matchesPlayerId(candidate, playerId));
         return player === undefined
             ? err("INVALID_STATE", `玩家 ${playerId} 当前不在线。`)
             : ok(player);

@@ -2,6 +2,7 @@ import { BlockTypes, Direction, EntityComponentTypes, GameMode, world, } from "@
 import { getPlayerSkin, LookDuration, PersonaArmSize, PersonaPieceType, SimulatedPlayer, spawnSimulatedPlayer, } from "@minecraft/server-gametest";
 import { HOTBAR_SLOT_COUNT, INVENTORY_SLOT_COUNT } from "../../domain/inventory.js";
 import { selectBestWeaponSlot, selectReplacementToolSlot, toolKind, } from "../../domain/inventorySelection.js";
+import { matchesPlayerId } from "../../presentation/playerContext.js";
 const TAG_PREFIX = "xiaobo_fp_";
 const MAX_EXPERIENCE_CHANGE = 16_777_216;
 const SATURATION_EFFECT = "minecraft:saturation";
@@ -11,7 +12,7 @@ export class SapiFakePlayerRuntime {
     handles = new Map();
     miningTools = new Map();
     capturePlayerSkin(playerId) {
-        const source = world.getAllPlayers().find((player) => player.playfabId === playerId);
+        const source = world.getAllPlayers().find((player) => matchesPlayerId(player, playerId));
         if (source === undefined)
             throw new Error(`skin ${playerId}: 未找到在线真人玩家。`);
         const skin = getPlayerSkin(source);

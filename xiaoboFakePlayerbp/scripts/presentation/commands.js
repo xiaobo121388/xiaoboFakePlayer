@@ -1,7 +1,7 @@
 import { CommandPermissionLevel, CustomCommandParamType, CustomCommandStatus, Entity, system, world, } from "@minecraft/server";
 import { CAPABILITY_MATRIX, isCapabilityEnabled } from "../domain/capabilities.js";
 import { openMainForm, openRecoveryForm } from "./forms/main.js";
-import { actorIdentity, isRealPlayer, playerLocation } from "./playerContext.js";
+import { actorIdentity, getPlayerStableId, isRealPlayer, playerLocation } from "./playerContext.js";
 export function registerCommands(registry, services) {
     registry.registerEnum("xiaobo:fake_player_game_mode", ["survival", "creative", "adventure", "spectator"]);
     registry.registerEnum("xiaobo:fake_player_skin_mode", ["default", "copy_actor"]);
@@ -187,12 +187,13 @@ export function registerCommands(registry, services) {
             return;
         }
         const target = targets[0];
-        if (target === undefined || target.playfabId.length === 0) {
-            player.sendMessage("§c目标必须是拥有 PlayFab ID 的真人玩家。§r");
+        const targetId = target ? getPlayerStableId(target) : "";
+        if (target === undefined || targetId.length === 0) {
+            player.sendMessage("§c目标必须是拥有持久稳定 ID 的真人玩家。§r");
             return;
         }
         const result = services.permissions.setGrant(actor, {
-            playerId: target.playfabId,
+            playerId: targetId,
             lastKnownName: target.name,
         }, permission, enabled === "on");
         player.sendMessage(result.ok

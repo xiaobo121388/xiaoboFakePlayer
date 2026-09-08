@@ -1,4 +1,5 @@
 import { Direction, world } from "@minecraft/server";
+import { matchesPlayerId } from "../../presentation/playerContext.js";
 export class SapiWorldQueries {
     runtime;
     constructor(runtime) {
@@ -75,7 +76,7 @@ export class SapiWorldQueries {
         return distanceSquared(fakePlayer.location, target.location);
     }
     findOnlinePlayer(playerId) {
-        const player = world.getAllPlayers().find((candidate) => candidate.playfabId === playerId);
+        const player = world.getAllPlayers().find((candidate) => matchesPlayerId(candidate, playerId));
         return player === undefined ? undefined : toTarget(player);
     }
     findInteractionTargets(fakePlayerId, query) {

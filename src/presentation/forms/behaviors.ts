@@ -5,7 +5,7 @@ import { HOTBAR_SLOT_COUNT } from "../../domain/inventory.js";
 import type { BehaviorConfig, FakePlayerRecord, Point } from "../../domain/model.js";
 import { withMinecraftNamespace } from "../../domain/validation.js";
 import type { CommandServices } from "../commands.js";
-import { actorIdentity, isRealPlayer } from "../playerContext.js";
+import { actorIdentity, getPlayerStableId, isRealPlayer } from "../playerContext.js";
 import { behaviorChangeMessage } from "./behaviorChangeMessage.js";
 import { formBoundary, ready, sendError, t } from "./formSupport.js";
 
@@ -403,9 +403,10 @@ function followTargets(record: FakePlayerRecord): readonly {
         });
     }
     for (const target of world.getAllPlayers().filter(isRealPlayer)) {
-        if (target.playfabId.length === 0) continue;
-        const existing = targets.find((candidate) => candidate.playerId === target.playfabId);
-        if (existing === undefined) targets.push({ playerId: target.playfabId, name: target.name, label: target.name });
+        const targetId = getPlayerStableId(target);
+        if (targetId.length === 0) continue;
+        const existing = targets.find((candidate) => candidate.playerId === targetId);
+        if (existing === undefined) targets.push({ playerId: targetId, name: target.name, label: target.name });
         else {
             existing.name = target.name;
             existing.label = target.name;

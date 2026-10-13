@@ -86,6 +86,8 @@ application 端口只接收稳定 ID、自有坐标、结构 ID、逻辑槽位�
 
 主手只由 `selectedSlotIndex` 指向库存槽，不重复保存。完整 `ItemStack` 通过世界结构保存，application 和 domain 从不手工序列化物品组件。
 
+物品回读比较位于 `infrastructure/sapi/itemStackComparison.ts`。可堆叠物品使用原生 `isStackableWith`；非堆叠物品逐项比较公开字段，并对未知组件保守拒绝。26.52 会在剑等旧物品上暴露 `minecraft:block_actor_dynamic_properties`：仅当该组件可读取且 `totalByteCount() === 0` 时，把它作为空容器处理，兼容旧版未暴露该组件的同一物品。非零、无效或不可读取的组件不能因为数量、类型相同就通过比较。失败诊断报告第一个槽位、物品类型及差异字段，不输出书籍、名称或动态属性内容。
+
 临时工作区必须先保存原方块结构并写 operations 日志，之后才能放置木桶。新快照通过重新加载并逐槽比较后才可成为 catalog 权威 revision，最后恢复原方块并清理工作区。每个脚本会话第一次进入检查点、安全下线或中断下线恢复路径时，按结构管理器的真实可见性把当前 revision（否则 fallback revision）钉为该会话恢复基线；后续周期检查点和安全下线只替换当前快照并保留该基线。下一次脚本会话若新当前快照仍可见，才将其提升为新会话基线并淘汰更旧结构。启动恢复以 `restore` 的实际结果为准，若当前快照因进程强退未落盘且返回 `NOT_FOUND`，只允许尝试 catalog 明确登记的会话基线，成功后立即清空检查点时间基准以便补拍。预检查不能替代真实恢复结果，其他恢复错误也不能触发回退。物品转移和死亡复活会清除旧回退代，禁止跨所有权变化或死亡掉落回退。
 
 ## 物品事务
@@ -127,7 +129,7 @@ prepared -> staged -> applying -> committed -> checkpointed
 
 `domain/capabilities.ts` 是用户可见能力的单一数据源。状态分为：
 
-- `enabled`：代码路径已实现；标记 `bedrock_26_33_required` 的项目仍需实机发布验收。
+- `enabled`：代码路径已实现；标记 `bedrock_26_52_required` 的项目仍需实机发布验收。
 - `hidden_pending_game_validation`：精确类型或概念存在，但 Forms 和命令默认不注册入口。
 - `unsupported`：公开 API 没有可靠等价，不提供反射、固定延时或命令伪装。
 

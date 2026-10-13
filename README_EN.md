@@ -10,12 +10,16 @@
 
 A simulated-player management add-on for Minecraft Bedrock. You can create persistent fake players whose inventories and states are saved, manage them through graphical menus, and have them move, fight, mine, interact, and use items.
 
+Current add-on version: **1.3.0**. See the [changelog](CHANGELOG_EN.md) for changes and upgrade notes.
+
 ## Requirements
 
-- Minecraft Bedrock release **1.26.33**.
+- Minecraft Bedrock release **1.26.52**.
 - The world must have the **Beta APIs** experiment enabled.
 - Both the behavior pack and resource pack must be enabled in the world.
 - Back up your world first. Changes to Beta APIs or the game version may affect the add-on.
+
+The game displays **26.52**; manifest engine versions and npm type packages use **1.26.52**. This migration pins the matching public types and module dependencies. See the [26.52 compatibility audit](docs/bedrock-26.52.md) for release notes, API differences, and verified sources.
 
 ## Installation
 
@@ -122,6 +126,7 @@ These commands require the target fake player to be online. The add-on subsequen
 - Back up your world regularly, especially before updating Minecraft or the add-on, transferring many items, or changing experiments.
 - Leave the world using the normal Save & Quit option instead of terminating the game process. A forced exit may roll back recent fake-player inventory changes to the latest saved checkpoint.
 - Do not manually delete structures, world dynamic properties, or tagged fake-player entities created by this add-on, as doing so may prevent inventory snapshots from being recovered.
+- When upgrading to 26.52, newly exposed empty block-actor dynamic-property components on nonstackable items no longer cause false inventory readback failures. Nonempty data that cannot be fully observed still fails closed. Diagnostics identify the first differing slot and component/field names; old fake players do not need to be deleted.
 - Prefer the default `recycle` mode when deleting a fake player. Use the irreversible `purge` mode only after confirming that its items, experience, and snapshots are no longer needed.
 - If an operation is interrupted, ask an operator to open `/xiaobo:fp_recovery` first. Do not repeatedly delete, recreate, or overwrite the same fake player.
 - Wait for the relevant chunks to load while the system reports that it is recovering. During read-only isolation, an operator can open `/xiaobo:fpset` or `/xiaobo:fp_recovery`: retry listed item transactions first, then, when no transaction references it, choose an exceptional record or a stable-tagged entity with no catalog record and confirm permanent loss of its items, experience, snapshots, and settings. The add-on retries startup recovery automatically and restores all features only after recovery succeeds.
@@ -130,11 +135,30 @@ These commands require the target fake player to be online. The add-on subsequen
 
 ## Limitations
 
-- The current version targets Minecraft Bedrock 1.26.33 only. Other versions are not guaranteed to work.
+- The current version targets Minecraft Bedrock 1.26.52 only. Other versions are not guaranteed to work.
 - Classic skin textures cannot be copied. `copy_actor` is intended primarily for Persona appearances and falls back to the default skin when copying is unavailable.
 - Automatic fishing, hiding fake players from the player list, NetEase-only private properties, and private NBT are not supported.
 - Fake players do not load chunks at unlimited distances. Actions fail when a target chunk is unloaded, a target is in another dimension, or a target is too far away.
 - The add-on primarily targets local worlds and host-led multiplayer. Long-term chunk loading on Realms, Dedicated Servers, or without a real player online is not guaranteed.
+
+## Real-Game Release Gate
+
+Automated tests do not validate Minecraft engine behavior. Run these checks in a separate backed-up world on **Bedrock release 26.52**, with Beta APIs enabled. These real-game checks have not been completed for this migration.
+
+On 2026-10-13, a focused upgrade regression was verified in an existing world: reloading the fix restored the normal management menu, and all seven records, fp0001-fp0007, were online. This does not replace the full acceptance matrix below.
+
+| Area | Acceptance criteria | Status |
+|---|---|---|
+| Startup and permissions | Both packs load; all 29 commands, operator and granted permissions, empty-hand interaction, and form cancellation/submission work | Pending |
+| Lifecycle | Create, online/offline, rename, death/respawn, normal world reentry, and stable-ID rebinding | Pending |
+| Dimensions and teleport | Create, respawn, and teleport to explicit coordinates in the Overworld, Nether, and End; report cross-dimension passenger errors instead of claiming success | Pending |
+| 41-slot item fidelity | Hotbar, inventory, equipment, offhand, durability/enchantments, names/lore, books, nested containers, structure-v2 saves, and older snapshot restoration | Pending |
+| Item and XP transactions | Online/offline exchanges, transfers, chunked XP updates, exact before/after recovery, and isolation of mixed state | Pending |
+| Persona | Restore pieces, arm size, and color; explicitly fall back for classic skins | Pending |
+| Automatic behavior | Follow, attack and weapon selection, mining and replacement tools, interaction/building, item use, projectile ownership, and saturation effects | Pending |
+| Recovery and scheduling | Test forced exits only in disposable worlds; verify A/B banks, workspaces, orphan handling, and watchdog-safe scheduling with 10 fake players | Pending |
+
+Direct hunger/saturation-component writes and automatic fishing remain hidden. Classic-skin texture copying, player-list hiding, and NetEase-only private capabilities remain unsupported.
 
 ## License and Acknowledgements
 

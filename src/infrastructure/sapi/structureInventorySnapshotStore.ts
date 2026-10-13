@@ -20,6 +20,9 @@ import { EQUIPMENT_SLOT, TOTAL_SLOT_COUNT, toStructureSlot } from "../../domain/
 import type { FakePlayerId, WorkspaceOperation } from "../../domain/model.js";
 import { err, ok, type Result } from "../../domain/results.js";
 import { SapiFakePlayerRuntime } from "./fakePlayerRuntime.js";
+import { describeInventoryDifference, imagesEqual, type InventoryImage } from "./itemStackComparison.js";
+
+export { imagesEqual, itemStacksEqual, type InventoryImage } from "./itemStackComparison.js";
 
 interface WorkspaceContext {
     readonly operation: WorkspaceOperation;
@@ -30,8 +33,6 @@ interface BarrelPair {
     readonly A: Container;
     readonly B: Container;
 }
-
-export type InventoryImage = readonly (ItemStack | undefined)[];
 
 const EQUIPMENT_BY_LOGICAL_SLOT: Readonly<Record<number, EquipmentSlot>> = {
     [EQUIPMENT_SLOT.head]: EquipmentSlot.Head,
@@ -77,9 +78,11 @@ export class StructureInventorySnapshotStore implements InventorySnapshotStore {
                 includeEntities: false,
             });
             const verifiedBarrels = getBarrels(workspace.dimension, workspace.operation.origin);
-            if (!verifiedBarrels.ok || !imagesEqual(image.value, readBarrelImage(verifiedBarrels.value))) {
+            const verifiedImage = verifiedBarrels.ok ? readBarrelImage(verifiedBarrels.value) : undefined;
+            if (verifiedImage === undefined || !imagesEqual(image.value, verifiedImage)) {
                 world.structureManager.delete(structureId);
-                return err("CONFLICT", `快照 ${structureId} 回读校验失败。`);
+                return err("CONFLICT", `快照 ${structureId} 回读校验失败。`
+                    + (verifiedImage === undefined ? "无法读取木桶 image。" : describeInventoryDifference(image.value, verifiedImage)));
             }
             const snapshotted = this.updateWorkspacePhase(workspace.operation.id, "snapshotted");
             return snapshotted.ok ? ok(structureId) : snapshotted;
@@ -103,14 +106,16 @@ export class StructureInventorySnapshotStore implements InventorySnapshotStore {
             const current = readPlayerImage(player);
             if (!current.ok) return current;
             if (!imageIsEmpty(current.value) && !imagesEqual(current.value, snapshot)) {
-                return err("CONFLICT", `假人 ${fakePlayerId} 的背包既非空也不等于快照，已隔离恢复。`);
+                return err("CONFLICT", `假人 ${fakePlayerId} 的背包既非空也不等于快照，已隔离恢复。`
+                    + describeInventoryDifference(snapshot, current.value));
             }
             if (imageIsEmpty(current.value)) {
                 const written = writePlayerImage(player, snapshot);
                 if (!written.ok) return written;
                 const verified = readPlayerImage(player);
                 if (!verified.ok || !imagesEqual(verified.value, snapshot)) {
-                    return err("CONFLICT", `假人 ${fakePlayerId} 的背包恢复回读失败。`);
+                    return err("CONFLICT", `假人 ${fakePlayerId} 的背包恢复回读失败。`
+                        + (verified.ok ? describeInventoryDifference(snapshot, verified.value) : verified.error.message));
                 }
             }
             const restored = this.updateWorkspacePhase(workspace.operation.id, "snapshotted");
@@ -161,9 +166,11 @@ export class StructureInventorySnapshotStore implements InventorySnapshotStore {
                 includeEntities: false,
             });
             const verified = getBarrels(workspace.dimension, workspace.operation.origin);
-            if (!verified.ok || !imagesEqual(image, readBarrelImage(verified.value))) {
+            const verifiedImage = verified.ok ? readBarrelImage(verified.value) : undefined;
+            if (verifiedImage === undefined || !imagesEqual(image, verifiedImage)) {
                 world.structureManager.delete(structureId);
-                return err("CONFLICT", `结构 image ${structureId} 回读校验失败。`);
+                return err("CONFLICT", `结构 image ${structureId} 回读校验失败。`
+                    + (verifiedImage === undefined ? "无法读取木桶 image。" : describeInventoryDifference(image, verifiedImage)));
             }
             return this.updateWorkspacePhase(workspace.operation.id, "snapshotted");
         });
@@ -396,115 +403,6 @@ function clearBarrelsIfPresent(dimension: Dimension, origin: Vector3): void {
 
 function imageIsEmpty(image: readonly (ItemStack | undefined)[]): boolean {
     return image.every((item) => item === undefined);
-}
-
-export function imagesEqual(left: InventoryImage, right: InventoryImage): boolean {
-    return left.length === right.length && left.every((item, index) => itemStacksEqual(item, right[index]));
-}
-
-export function itemStacksEqual(left: ItemStack | undefined, right: ItemStack | undefined): boolean {
-    if (left === undefined || right === undefined) return left === right;
-    if (left.amount !== right.amount || left.typeId !== right.typeId) return false;
-    if (left.isStackable && right.isStackable) return left.isStackableWith(right);
-
-    const leftFingerprint = itemStackFingerprint(left, 0);
-    const rightFingerprint = itemStackFingerprint(right, 0);
-    return leftFingerprint !== undefined && leftFingerprint === rightFingerprint;
-}
-
-const MAX_NESTED_CONTAINER_DEPTH = 8;
-const OBSERVABLE_ITEM_COMPONENTS = new Set([
-    "minecraft:book",
-    "minecraft:compostable",
-    "minecraft:cooldown",
-    "minecraft:durability",
-    "minecraft:dyeable",
-    "minecraft:enchantable",
-    "minecraft:food",
-    "minecraft:inventory",
-    "minecraft:potion",
-]);
-
-function itemStackFingerprint(itemStack: ItemStack, depth: number): string | undefined {
-    const componentIds = itemStack.getComponents().map((component) => component.typeId).sort();
-    if (componentIds.some((componentId) => !OBSERVABLE_ITEM_COMPONENTS.has(componentId))) return undefined;
-
-    const inventory = itemStack.getComponent("minecraft:inventory");
-    if (inventory !== undefined && depth >= MAX_NESTED_CONTAINER_DEPTH) return undefined;
-    const nestedItems: (string | null)[] = [];
-    if (inventory !== undefined) {
-        for (let slot = 0; slot < inventory.container.size; slot += 1) {
-            const nestedItem = inventory.container.getItem(slot);
-            if (nestedItem === undefined) {
-                nestedItems.push(null);
-                continue;
-            }
-            const fingerprint = itemStackFingerprint(nestedItem, depth + 1);
-            if (fingerprint === undefined) return undefined;
-            nestedItems.push(fingerprint);
-        }
-    }
-
-    const book = itemStack.getComponent("minecraft:book");
-    const durability = itemStack.getComponent("minecraft:durability");
-    const dyeable = itemStack.getComponent("minecraft:dyeable");
-    const enchantable = itemStack.getComponent("minecraft:enchantable");
-    const potion = itemStack.getComponent("minecraft:potion");
-    const dynamicProperties = itemStack.getDynamicPropertyIds().sort().map((propertyId) => [
-        propertyId,
-        itemStack.getDynamicProperty(propertyId),
-    ]);
-    const enchantments = enchantable?.getEnchantments().map((enchantment) => [
-        enchantment.type.id,
-        enchantment.level,
-    ] as const).sort(([leftId, leftLevel], [rightId, rightLevel]) => (
-        leftId === rightId ? leftLevel - rightLevel : leftId.localeCompare(rightId)
-    )) ?? [];
-
-    return JSON.stringify(canonicalizeItemValue({
-        amount: itemStack.amount,
-        book: book === undefined ? null : {
-            author: book.author ?? null,
-            contents: book.contents,
-            isSigned: book.isSigned,
-            rawContents: book.rawContents,
-            title: book.title ?? null,
-        },
-        canDestroy: itemStack.getCanDestroy(),
-        canPlaceOn: itemStack.getCanPlaceOn(),
-        componentIds,
-        durability: durability === undefined ? null : {
-            damage: durability.damage,
-            maxDurability: durability.maxDurability,
-            unbreakable: durability.unbreakable,
-        },
-        dyeable: dyeable === undefined ? null : {
-            color: dyeable.color ?? null,
-            defaultColor: dyeable.defaultColor ?? null,
-        },
-        dynamicProperties,
-        enchantments,
-        inventory: inventory === undefined ? null : nestedItems,
-        isStackable: itemStack.isStackable,
-        keepOnDeath: itemStack.keepOnDeath,
-        lockMode: itemStack.lockMode,
-        nameTag: itemStack.nameTag ?? null,
-        potion: potion === undefined ? null : {
-            deliveryType: potion.potionDeliveryType,
-            effectType: potion.potionEffectType,
-        },
-        rawLore: itemStack.getRawLore(),
-        tags: itemStack.getTags().sort(),
-        typeId: itemStack.typeId,
-    }));
-}
-
-function canonicalizeItemValue(value: unknown): unknown {
-    if (Array.isArray(value)) return value.map(canonicalizeItemValue);
-    if (value === null || typeof value !== "object") return value;
-    return Object.fromEntries(Object.entries(value)
-        .sort(([leftKey], [rightKey]) => leftKey.localeCompare(rightKey))
-        .map(([key, nestedValue]) => [key, canonicalizeItemValue(nestedValue)]));
 }
 
 function equipmentSlotFor(logicalSlot: number): EquipmentSlot {
